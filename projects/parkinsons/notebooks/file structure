@@ -1,0 +1,35 @@
+file scaffold
+~/bioinformatics/                #  main workspace
+│
+├── braingeneers/                # Package: reusable modules (git repo)
+├── braindance/                  # Package: another reusable module (git repo)
+│
+├── environment/                 # Conda envs, Dockerfiles, requirements
+│   ├── braingeneers.yml
+│   ├── project_envs/
+│   │   ├── parkinsons_exp2.yml
+│   │   └── spikeinterface.yml
+│
+├── projects/                    # Data/analysis-oriented experiments
+│   ├── parkinsons_exp2/
+│   │   ├── data/                # Raw/processed project-specific data
+│   │   ├── notebooks/
+│   │   ├── scripts/
+│   │   ├── results/
+│   │   ├── environment.yml      # Optional: project-specific env
+│   │   └── README.md
+│   ├── sttc_analysis/
+│   └── spikeinterface_eval/
+│
+├── data/                        # Shared large datasets (non-Git)
+│   ├── external/
+│   ├── processed/
+│   └── raw/
+│
+├── notebooks/                   # General-purpose notebooks (non-project)
+│
+├── analysis_libs/              # Your own local packages (not external like `braindance`)
+│   ├── burst_detection/
+│   └── ...
+│
+└── docs/                        # Notes, protocols, grant drafts, etc.

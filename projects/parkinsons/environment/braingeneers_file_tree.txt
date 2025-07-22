@@ -1,0 +1,108 @@
+/opt/anaconda3/envs/brain/lib/python3.10/site-packages/braingeneers
+├── __init__.py
+├── __pycache__
+│   ├── __init__.cpython-310.pyc
+│   └── _version.cpython-310.pyc
+├── _version.py
+├── analysis
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-310.pyc
+│   │   ├── analysis_test.cpython-310.pyc
+│   │   ├── analysis.cpython-310.pyc
+│   │   └── visualize_maxwell.cpython-310.pyc
+│   ├── analysis_test.py
+│   ├── analysis.py
+│   └── visualize_maxwell.py
+├── data
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-310.pyc
+│   │   ├── datasets_electrophysiology_test.cpython-310.pyc
+│   │   ├── datasets_electrophysiology.cpython-310.pyc
+│   │   ├── datasets_fluidics.cpython-310.pyc
+│   │   ├── datasets_imaging.cpython-310.pyc
+│   │   ├── datasets_neuron.cpython-310.pyc
+│   │   └── datasets.cpython-310.pyc
+│   ├── datasets_electrophysiology_test.py
+│   ├── datasets_electrophysiology.py
+│   ├── datasets_fluidics.py
+│   ├── datasets_imaging.py
+│   ├── datasets_neuron.py
+│   ├── datasets.py
+│   ├── mxw_h5_plugin
+│   │   ├── Linux
+│   │   │   └── libcompression.so
+│   │   ├── Mac_arm64
+│   │   │   └── libcompression.dylib
+│   │   ├── Mac_x86_64
+│   │   │   └── libcompression.dylib
+│   │   └── Windows
+│   │       └── compression.dll
+│   └── transforms
+│       ├── __init__.py
+│       └── __pycache__
+│           └── __init__.cpython-310.pyc
+├── iot
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-310.pyc
+│   │   ├── device.cpython-310.pyc
+│   │   ├── example_device_main.cpython-310.pyc
+│   │   ├── example_device.cpython-310.pyc
+│   │   ├── gui.cpython-310.pyc
+│   │   ├── messaging_test.cpython-310.pyc
+│   │   ├── messaging.cpython-310.pyc
+│   │   ├── shadows_dev_playground.cpython-310.pyc
+│   │   ├── shadows.cpython-310.pyc
+│   │   └── simple.cpython-310.pyc
+│   ├── device.py
+│   ├── example_device_main.py
+│   ├── example_device.py
+│   ├── gui.py
+│   ├── messaging_test.py
+│   ├── messaging.py
+│   ├── shadows_dev_playground.py
+│   ├── shadows.py
+│   └── simple.py
+├── ml
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-310.pyc
+│   │   └── ephys_dataloader.cpython-310.pyc
+│   └── ephys_dataloader.py
+├── py.typed
+└── utils
+    ├── __init__.py
+    ├── __pycache__
+    │   ├── __init__.cpython-310.pyc
+    │   ├── common_utils_test.cpython-310.pyc
+    │   ├── common_utils.cpython-310.pyc
+    │   ├── configure_test.cpython-310.pyc
+    │   ├── configure.cpython-310.pyc
+    │   ├── memoize_s3_test.cpython-310.pyc
+    │   ├── memoize_s3.cpython-310.pyc
+    │   ├── numpy_s3_memmap_test.cpython-310.pyc
+    │   └── numpy_s3_memmap.cpython-310.pyc
+    ├── common_utils_test.py
+    ├── common_utils.py
+    ├── configure_test.py
+    ├── configure.py
+    ├── memoize_s3_test.py
+    ├── memoize_s3.py
+    ├── numpy_s3_memmap_test.py
+    ├── numpy_s3_memmap.py
+    ├── s3wrangler
+    │   ├── __init__.py
+    │   ├── __pycache__
+    │   │   ├── __init__.cpython-310.pyc
+    │   │   └── s3wrangler_test.cpython-310.pyc
+    │   └── s3wrangler_test.py
+    └── smart_open_braingeneers
+        ├── __init__.py
+        ├── __pycache__
+        │   ├── __init__.cpython-310.pyc
+        │   └── smart_open_braingeneers_test.cpython-310.pyc
+        └── smart_open_braingeneers_test.py
+
+23 directories, 83 files
