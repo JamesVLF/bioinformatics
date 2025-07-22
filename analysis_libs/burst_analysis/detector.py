@@ -155,12 +155,12 @@ class BurstDetection:
                 end = len(times) - 1
 
             # symmetric trimming so bursts have consistent durations around peak
-            lead = peak - start
-            lag = end - peak
-            if lag > lead:
-                end = peak + lead
-            if end >= len(times):
-                end = len(times) - 1
+            #lead = peak - start
+            #lag = end - peak
+            #if lag > lead:
+            #    end = peak + lead
+            #if end >= len(times):
+            #    end = len(times) - 1
 
             # Store (start_idx, end_idx) of burst
             bursts.append((start, end))
