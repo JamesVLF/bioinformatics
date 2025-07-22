@@ -1,0 +1,46 @@
+# === Data files ===
+data/
+**/data/
+*.csv
+*.tsv
+*.npy
+*.npz
+*.h5
+*.hdf5
+*.pkl
+*.mat
+
+# === Results and temp files ===
+results/
+**/results/
+*.log
+*.tmp
+
+# === Python build and cache ===
+__pycache__/
+*.py[cod]
+*.pyo
+
+# === Jupyter notebooks ===
+.ipynb_checkpoints/
+
+# === Environments ===
+env/
+venv/
+.venv/
+ENV/
+environment/
+**/environment/
+
+# === Conda ===
+*.conda
+*.lock
+*.yaml
+
+# === System files ===
+.DS_Store
+Thumbs.db
+
+# === Editor and IDE settings ===
+.vscode/
+.idea/
