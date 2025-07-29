@@ -67,7 +67,7 @@ class BurstDetectionPlots
         """
         Plots population firing rate with optional burst spans and peak markers.
 
-        Parameters:
+        Args:
             times (np.ndarray): Time axis (seconds).
             rate (np.ndarray): Smoothed population rate.
             bursts (List[Tuple[int, int]]): List of (start_idx, end_idx) index pairs.
@@ -309,7 +309,7 @@ class BAMacPlots
         """
         Plots violin plots for unit burst participation data.
 
-        Parameters:
+        Args:
         - grouped_participation: dict {label: [participation fractions]}
         - ordered_short_labels: list of dataset labels in desired x-axis order
         - control_subjects: set of subject IDs considered control
@@ -350,8 +350,7 @@ class BAMacPlots
         """
         Plot violin distributions of Spearman z-scores grouped by condition and dataset.
 
-        Parameters
-        ----------
+        Args:
         zscore_distributions : dict
             Mapping of {label: list of z-scores} for each dataset-condition pair.
         ordered_short_labels : list of str
@@ -359,8 +358,7 @@ class BAMacPlots
         control_subjects : set
             Set of subject IDs (e.g., {"s1", "s2"}) considered CONTROL.
 
-        Notes
-        -----
+        Notes:
         - Generates a violin plot where each dataset-condition pair's z-scores are shown.
         - Adds appropriate axis labels and titles.
         """
@@ -398,34 +396,197 @@ class BAMacPlots
         plt.tight_layout()
         plt.show()
 
-    def plot_burst_similarity_matrix(sim_matrix, title="Burst Similarity (Cosine)", save_path=None):
+    def plot_burst_similarity_matrix(sim_matrix, title="Burst Similarity (Cosine)"):
         """
-        mask = np.tril_indices_from(sim_matrix, k=0)
-        masked_sim = np.copy(sim_matrix)
-        masked_sim[mask] = np.nan
-        """
-        plt.figure(figsize=(7, 6))
-        cmap = plt.cm.hot
-        im = plt.imshow(masked_sim, cmap=cmap, vmin=0, vmax=1)
+        Plots the burst-to-burst similarity matrix.
 
-        plt.colorbar(im, label="Cosine Similarity")
+        Args:
+            sim_matrix (np.ndarray): Square matrix [n_bursts, n_bursts] of cosine similarity values.
+            title (str): Plot title.
+        """
+        if sim_matrix is None:
+            print("[INFO] Nothing to plot. Similarity matrix is None.")
+            return
+
+        plt.figure(figsize=(6, 5))
+        plt.imshow(sim_matrix, cmap="viridis", interpolation="nearest")
+        plt.colorbar(label="Cosine similarity")
         plt.title(title)
         plt.xlabel("Burst Index")
         plt.ylabel("Burst Index")
+        plt.xticks(np.arange(sim_matrix.shape[0]))
+        plt.yticks(np.arange(sim_matrix.shape[1]))
         plt.tight_layout()
-
-        if save_path:
-            plt.savefig(save_path)
         plt.show()
 
-    def plot_pairwise_correlation_matrix(corr_matrix, title="Pairwise IFR Correlation Matrix"):
+    def plot_dual_similarity_matrices(results_dict):
         """
-        Plots a heatmap of pairwise correlations between units.
+        Plots similarity matrix and corresponding average IFR waveform
+        for one or more datasets.
+
+        Args:
+            results_dict (dict): 
+                {
+                    dataset_key: {
+                        "sim_matrix": np.ndarray,
+                        "burst_stack": np.ndarray,
+                        "avg_matrix": np.ndarray,
+                        "peak_times": np.ndarray
+                    },
+                    ...
+                }
+        """
+        n_datasets = len(results_dict)
+        fig, axes = plt.subplots(
+            n_datasets, 2, 
+            figsize=(10, 5 * n_datasets),
+            squeeze=False
+        )
+
+        for i, (key, res) in enumerate(results_dict.items()):
+            sim_matrix = res["sim_matrix"]
+            avg_matrix = res["avg_matrix"]
+            burst_stack = res["burst_stack"]
+            peak_times = res["peak_times"]
+
+            # ---- Plot 1: Similarity Matrix ----
+            ax1 = axes[i, 0]
+            im = ax1.imshow(sim_matrix, cmap='viridis', aspect='auto')
+            ax1.set_title(f"{key} - Burst Similarity (Cosine)")
+            ax1.set_xlabel("Burst Index")
+            ax1.set_ylabel("Burst Index")
+            
+            # Optional: annotate burst times on ticks if available
+            if peak_times is not None and len(peak_times) == sim_matrix.shape[0]:
+                labels = [f"{t:.2f}s" for t in peak_times]
+                ax1.set_xticks(range(len(labels)))
+                ax1.set_yticks(range(len(labels)))
+                ax1.set_xticklabels(labels, rotation=45, fontsize=8)
+                ax1.set_yticklabels(labels, fontsize=8)
+
+            fig.colorbar(im, ax=ax1, fraction=0.046, pad=0.04)
+
+            # ---- Plot 2: Average IFR waveform ----
+            ax2 = axes[i, 1]
+            if avg_matrix is not None:
+                time_axis = np.arange(avg_matrix.shape[1]) * 0.01  # 10 ms bins default
+                ax2.imshow(avg_matrix, aspect='auto', cmap='hot', origin='lower')
+                ax2.set_title(f"{key} - Mean IFR (Aligned Bursts)")
+                ax2.set_xlabel("Time (s)")
+                ax2.set_ylabel("Units (sorted)")
+                ax2.set_xticks(np.linspace(0, avg_matrix.shape[1]-1, 5))
+                ax2.set_xticklabels([f"{t:.2f}" for t in np.linspace(time_axis[0], time_axis[-1], 5)])
+            else:
+                ax2.text(0.5, 0.5, "No average IFR data", ha='center', va='center')
+
+        plt.tight_layout()
+        plt.show()
+
+    def plot_burst_aligned_ifr_matrix(avg_matrix, peak_times=None, title="Average Burst-Aligned IFR"):
+        """
+        Plots the average IFR matrix aligned to burst peaks.
+
+        Args:
+            avg_matrix (np.ndarray): [n_units, n_bins] average IFR across bursts.
+            peak_times (np.ndarray, optional): Detected burst peak times (s).
+            title (str): Title of the plot.
+        """
+        if avg_matrix is None:
+            print("No data to plot.")
+            return
+
+        plt.figure(figsize=(12, 6))
+        plt.imshow(
+            avg_matrix,
+            aspect='auto',
+            origin='lower',
+            cmap='hot'
+        )
+        plt.colorbar(label='Instantaneous FR (Hz)')
+        plt.xlabel("Time bins (relative to burst peak)")
+        plt.ylabel("Neuron (sorted)")
+        plt.title(title)
+
+        if peak_times is not None:
+            plt.axvline(avg_matrix.shape[1] // 2, color='red', linestyle='--', label='Burst Peak')
+            plt.legend()
+
+        plt.tight_layout()
+        plt.show()
+
+    def plot_peak_centered_ifr_segments(stack, time_axis, title="Peak-Centered IFR Segments"):
+        """
+        Plots multiple IFR segments aligned to burst peaks.
+
+        Args:
+            stack (np.ndarray): [n_bursts, n_units, n_bins]
+            time_axis (np.ndarray): Time axis for each segment (centered on 0).
+            title (str): Plot title.
+        """
+        if stack is None or time_axis is None:
+            print("No data to plot.")
+            return
+
+        plt.figure(figsize=(12, 6))
+        mean_trace = np.mean(np.sum(stack, axis=1), axis=0)  # sum across units, average across bursts
+        std_trace = np.std(np.sum(stack, axis=1), axis=0)
+
+        for burst in stack:
+            plt.plot(time_axis, np.sum(burst, axis=0), color="gray", alpha=0.3)
+
+        plt.plot(time_axis, mean_trace, color="black", linewidth=2, label="Mean FR")
+        plt.plot(time_axis, mean_trace + std_trace, linestyle="--", color="black", alpha=0.7, label="+1 STD")
+        plt.plot(time_axis, mean_trace - std_trace, linestyle="--", color="black", alpha=0.7, label="-1 STD")
+        plt.axvline(0, color='red', linestyle='--', label='Burst Peak')
+
+        plt.xlabel("Time relative to burst peak (s)")
+        plt.ylabel("Population FR (Hz)")
+        plt.title(title)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    def plot_population_ifr_with_bursts(rate_matrix, times, bursts, title="Population IFR with Burst Windows"):
+        """
+        Plots IFR over time with burst windows highlighted.
+
+        Args:
+            rate_matrix (np.ndarray): [n_bins, n_units] IFR matrix.
+            times (np.ndarray): Time axis corresponding to rate_matrix.
+            bursts (list of tuple): Start and end indices for bursts.
+            title (str): Plot title.
+        """
+        if rate_matrix is None or times is None:
+            print("No data to plot.")
+            return
+
+        population_rate = np.sum(rate_matrix, axis=1)
+
+        plt.figure(figsize=(14, 5))
+        plt.plot(times, population_rate, label="Population IFR", color="black")
+
+        for start, end in bursts:
+            plt.axvspan(times[start], times[end], color='red', alpha=0.3)
+
+        plt.xlabel("Time (s)")
+        plt.ylabel("Population FR (Hz)")
+        plt.title(title)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    def plot_pairwise_ifr_correlation(corr_matrix, title="Pairwise IFR Correlation Matrix"):
+        """
+        Plots a heatmap of pairwise IFR correlations between units.
 
         Args:
             corr_matrix (np.ndarray): Square matrix of unit-to-unit correlation values.
-            title (str): Title of the plot.
+            title (str): Plot title.
         """
+        if corr_matrix is None:
+            print("No data to plot.")
+            return
+
         plt.figure(figsize=(8, 6))
         im = plt.imshow(corr_matrix, cmap="hot", aspect="auto", vmin=0, vmax=1)
         plt.colorbar(im, label="Pearson r")
@@ -434,3 +595,100 @@ class BAMacPlots
         plt.ylabel("Unit Index")
         plt.tight_layout()
         plt.show()
+
+    def plot_relative_unit_peak_times(rel_peaks, title="Unit Peak Times Relative to Burst Peaks"):
+    """
+    Plots histogram of unit peak times relative to population burst peaks.
+
+    Args:
+        rel_peaks (list): List of peak time offsets (ms).
+        title (str): Plot title.
+    """
+    if not rel_peaks:
+        print("No data to plot.")
+        return
+
+    plt.figure(figsize=(10, 6))
+    plt.hist(rel_peaks, bins=40, color='gray', edgecolor='black', alpha=0.8)
+    plt.axvline(0, color='red', linestyle='--', label='Burst Peak (0 ms)')
+    plt.xlabel("Time Relative to Burst Peak (ms)")
+    plt.ylabel("Number of Units")
+    plt.title(title)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+# ---------------------------------------------------------
+#           BURST ANALYSIS MICRO PLOTS
+# --------------------------------------------------------
+class BAMicPlots
+    def plot_sorted_ifr_for_burst(sorted_burst_matrix, sorted_units, burst_time_axis, dataset_key=None, save_path=None):
+        """
+        Visualizes firing activity during a specific burst as a heatmap of IFR values.
+
+        This function takes the IFR submatrix extracted and sorted for one burst
+        and plots it as a time vs unit heatmap, where units are ordered by the time
+        of their peak firing activity.
+
+        Args:
+            sorted_burst_matrix (np.ndarray):
+                IFR data of shape [time_bins, sorted_units] for the burst.
+            sorted_units (np.ndarray):
+                Array of unit indices corresponding to the columns of the IFR matrix.
+            burst_time_axis (np.ndarray):
+                Time values (in seconds) relative to burst start for each bin.
+            dataset_key (str, optional):
+                Identifier for the dataset, displayed in the plot title.
+            save_path (str, optional):
+                If provided, saves the figure to this file path instead of displaying it.
+
+        Output:
+            fig (matplotlib.figure.Figure):
+                Figure handle for the generated plot.
+        """
+        # Handle edge case where no data is available
+        if sorted_burst_matrix is None or sorted_units is None or burst_time_axis is None:
+            print("No burst activity to plot.")
+            return None
+
+        # Transpose matrix for plotting (units on y-axis, time on x-axis)
+        data_to_plot = sorted_burst_matrix.T
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+        # Plot IFR heatmap
+        im = ax.imshow(
+            data_to_plot,
+            aspect='auto',
+            origin='lower',
+            extent=[burst_time_axis[0], burst_time_axis[-1], 0, len(sorted_units)],
+            cmap='hot'
+        )
+
+        # Add colorbar for firing rate intensity
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label("Instantaneous Firing Rate (Hz)")
+
+        # Label axes
+        ax.set_xlabel("Time relative to burst start (s)")
+        ax.set_ylabel("Units (sorted by peak firing time)")
+
+        # Optional dataset title
+        if dataset_key:
+            ax.set_title(f"Burst IFR Heatmap - {dataset_key}")
+        else:
+            ax.set_title("Burst IFR Heatmap (Sorted Units)")
+
+        # Adjust layout
+        plt.tight_layout()
+
+        # Save or display the figure
+        if save_path:
+            plt.savefig(save_path, dpi=300)
+            plt.close(fig)
+        else:
+            plt.show()
+
+        return fig

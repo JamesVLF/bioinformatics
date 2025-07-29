@@ -10,8 +10,6 @@ from scipy.stats import pearsonr
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.decomposition import PCA
 from scipy.signal import find_peaks
-    
-
 
 """
 BurstDetection has three different detectors. Used together, they can provide a multi-layered view on how subclasses of 
@@ -286,16 +284,11 @@ class BurstDetection:
     def detect_dim_population_bursts(self, window_size=2.0, step_size=0.5,
                                       min_active_neurons=10, min_spikes_per_neuron=1):
         """
-        Use this for finding and drilling down into subtle coordinated firing events that get washed out with
-        rms method. This method is ideal for perturbation assays or studying
-        drugs that diminish coordinated network activity.
-        Complementary to RMS- and ISI-based methods, and all are plugged into run_detection().
-
-        It works like this:
-        (1) Detects time windows of low-level but structured population activity.
-        (2) Scans spike trains for time windows that have a minimum number of active units (min_active_neurons)
-            that fire at least once (or more by changing min_spikes_per_neuron).
-        (3) Moves across time in sliding windows (window_size, step_size)
+        Method:
+            (1) Detects time windows of low-level but structured population activity.
+            (2) Scans spike trains for time windows that have a minimum number of active units (min_active_neurons)
+                that fire at least once (or more by changing min_spikes_per_neuron).
+            (3) Moves across time in sliding windows (window_size, step_size)
 
         Args:
             trains (list of np.ndarray): List of spike time arrays, one array per neuron.
@@ -304,8 +297,14 @@ class BurstDetection:
             min_active_neurons (int): Minimum number of different neurons that must spike during the window.
             min_spikes_per_neuron (int): Each of those neurons must fire this many times (default = 1).
 
-        Returns:
+        Outputs:
             List of tuples: Each tuple is (start_time, end_time) of detected windows.
+
+        Notes:
+            Use this for finding and drilling down into subtle coordinated firing events that get washed out with
+            rms method. This method is ideal for perturbation assays or studying
+            drugs that diminish coordinated network activity.
+            Complementary to RMS- and ISI-based methods, and all are plugged into run_detection().
         """
 
         # ---- Combine all spikes from all units into a single 1D array and assign to all_spikes ----
@@ -368,7 +367,7 @@ class BurstDetection:
             time_start (float): Start of user-defined analysis window.
             time_window (float): Duration of analysis window (in seconds).
 
-        Returns:
+        Outputs:
             dict of metrics
         """
         spike_trains = self.trains
@@ -410,7 +409,7 @@ class BurstDetection:
             aggregate (bool): If True, returns a merged list of bursts across all neurons (sorted by start time).
                               If False, returns a list of burst lists, one per neuron.
 
-        Returns:
+        Outputs:
             - If aggregate=False:
                 List of lists: Each sublist contains (start_time, end_time) tuples for bursts in that neuron.
             - If aggregate=True:
@@ -462,7 +461,7 @@ class BurstDetection:
             time_start (float): Start of window of interest.
             time_window (float): Length of window (s).
 
-        Returns:
+        Outputs:
             dict of metrics
         """
         spike_trains = self.trains
@@ -497,4 +496,3 @@ class BurstDetection:
         }
     
 
-    

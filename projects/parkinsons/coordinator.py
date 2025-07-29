@@ -5,7 +5,7 @@ from collections import defaultdict
 from burst_analysis.loading import SpikeDataLoader
 from burst_analysis.detection import BurstDetection
 from burst_analysis.computation import BurstAnalysisMacro
-from burst_analysis.plotting import BurstDetectionPlots, BAMacPlots
+from burst_analysis.plotting import BurstDetectionPlots, BAMacPlots, BAMicPlots 
 
 class OrchestratorPDx2:
     def __init__(self, spike_paths, track_results=True):
@@ -14,12 +14,18 @@ class OrchestratorPDx2:
         self.spike_data = self.loader.load()  
         self.track_results = track_results
         self.burst_detection_metrics_df = pd.DataFrame()
+        self.BAMac = None 
 
+    def _init_BAMac(self, config=None):
+        self.BAMac = BurstAnalysisMacro(
+            self.sd_main.train,
+            self.sd_main.metadata.get("fs", 10000),
+            config = config if config is not None else {}
+        )
 
     def get_burst_detector(self, dataset_key, config=None):
         if dataset_key not in self.spike_data:
-            raise ValueError(f"[ERROR] Dataset '{dataset_key}' not found.")
-        
+            raise ValueError(f"Dataset '{dataset_key}' not found.")
         sd = self.spike_data[dataset_key]
         fs = sd.metadata.get("fs", 10000)
         return BurstDetection(sd.train, fs=fs, config=config or {})
@@ -27,10 +33,23 @@ class OrchestratorPDx2:
     def list_datasets(self):
         return list(self.spike_data.keys())
 
-    def _normalize_dataset_key(self, key):
+    def _normalize_dataset_key(self, key): 
+        # for numpy array --> scalar conversion
         if isinstance(key, np.ndarray) and key.size == 1:
             return key.item()
         return key
+    
+    def _resolve_dataset_keys(self, dataset_key):
+        # Normalize dataset selection to a list of keys
+        if dataset_key is None:
+            return list(self.spike_data.keys())
+        elif isinstance(dataset_key, str):
+            return [dataset_key]
+        elif isinstance(dataset_key, (list, tuple)):
+            return list(dataset_key)
+        else:
+            raise ValueError("dataset_key must be None, str, or list/tuple of strings.")
+
 
     def get_unit_info(self, dataset_name=None):
         return self.loader.get_unit_info(dataset_name)
@@ -55,7 +74,7 @@ class OrchestratorPDx2:
         return list(self.spike_data.keys())
 
     # -------------------------------------------------------------------------
-    #           LEVEL 1 - BURST DETECTION + FEATURE EXTRACTION
+    #           LEVEL 1: BURST DETECTION + FEATURE EXTRACTION
     # -------------------------------------------------------------------------
 
     def show_neuron_count_plot(self, group_input=None):
@@ -71,7 +90,7 @@ class OrchestratorPDx2:
             detector = self.get_burst_detector(key, config)
             result = detector.compute_population_rate_and_bursts()
             if result[0] is None:
-                print(f"[WARNING] Burst detection failed for '{key}'")
+                print(f"Burst detection unsuccessful for '{key}'")
                 continue
             times, smoothed, peaks, peak_times, bursts, burst_windows = result
 
@@ -95,7 +114,7 @@ class OrchestratorPDx2:
             detector = self.get_burst_detector(key, config)
             dim_bursts = detector.detect_dim_population_bursts()
             if not dim_bursts:
-                print(f"[WARNING] No DIM bursts found in '{key}'")
+                print(f"No dim bursts found in '{key}'")
                 continue
             sd = self.spike_data[key]
             BurstDetectionPlots.plot_overlay_raster_dim_bursts(trains=sd.train, bursts=dim_bursts, dataset_label=key, time_range=time_range, save=save,
@@ -120,7 +139,7 @@ class OrchestratorPDx2:
                 ibis = np.diff(peak_times_arr)
                 print(f"Mean inter-burst interval (IBI): {np.mean(ibis):.2f} s")
         else:
-            print("\nNo bursts detected.")
+            print("\n No bursts detected.")
 
     def plot_isi_overlay(self, dataset_keys=None, config=None, time_range=(0, 180), save=False, output_dir=None):
         dataset_keys = dataset_keys or list(self.spike_data.keys())
@@ -128,7 +147,7 @@ class OrchestratorPDx2:
             detector = self.get_burst_detector(key, config)
             isi_bursts = detector.detect_isi_bursts(aggregate=True)
             if not isi_bursts:
-                print(f"[WARNING] No ISI bursts found in '{key}'")
+                print(f" No ISI bursts found in '{key}'")
                 continue
             sd = self.spike_data[key]
             BurstDetectionPlots.plot_overlay_raster_isi_bursts(trains=sd.train, bursts=isi_bursts, dataset_label=key, time_range=time_range, save=save,
@@ -149,7 +168,7 @@ class OrchestratorPDx2:
         return burst_windows
 
     # ----------------------------------------------------------
-    #           LEVEL 2 – BURST ANALYSIS MACRO
+    #           LEVEL 2: BURST ANALYSIS MACRO
     # ----------------------------------------------------------
 
     def compute_and_plot_unit_participation(self, sample_configs, control_subjects=None,
@@ -159,8 +178,7 @@ class OrchestratorPDx2:
         Computes per-unit burst participation fractions across multiple datasets
         and generates a violin plot comparing CONTROL vs TREATED groups.
 
-        Parameters
-        ----------
+        Args:
         sample_configs : dict
             Dictionary mapping dataset identifiers (e.g., 'S1', 'S2') to analysis configuration objects
             used for burst detection computations.
@@ -177,8 +195,7 @@ class OrchestratorPDx2:
         output_path : str, optional
             File path to save the plot (used only if save=True).
 
-        Returns
-        -------
+        Outputs:
         grouped_participation : dict
             Mapping of 'GROUP_dataset' → list of per-unit participation fractions.
         """
@@ -239,29 +256,27 @@ class OrchestratorPDx2:
     
     def run_burst_rank_order_analysis(bb, sample_configs, ordered_short_labels, control_subjects):
         """
-        Wrapper function that orchestrates the full analysis pipeline:
-        1. Builds peak time matrices for each dataset.
-        2. Computes Spearman rank correlations and z-scores.
-        3. Collects z-score distributions by condition.
-        4. Generates violin plots of the results.
+       This function has 4 components: 
+            1. Builds peak time matrices for each dataset.
+            2. Computes Spearman rank correlations and z-scores.
+            3. Collects z-score distributions by condition.
+            4. Generates violin plots of the results.
 
-        Parameters
-        ----------
-        bb : object
-            Analysis backend object with loaded spike data and helper methods.
-        sample_configs : dict
-            Configuration mapping for datasets (keyed by sample label).
-        ordered_short_labels : list of str
-            Dataset label order for plotting.
-        control_subjects : set
-            Subject IDs considered CONTROL for grouping.
+        Args:
+            bb : object
+                Analysis backend object with loaded spike data and helper methods.
+            sample_configs : dict
+                Configuration mapping for datasets (keyed by sample label).
+            ordered_short_labels : list of str
+                Dataset label order for plotting.
+            control_subjects : set
+                Subject IDs considered CONTROL for grouping.
 
-        Notes
-        -----
-        - Iterates through all datasets in `bb.loader.spike_data`.
-        - Filters bursts and units as per threshold rules.
-        - Uses the three computational methods and plotting function
-        to replicate the notebook analysis in structured form.
+        Notes:
+            - Iterates through all datasets in `bb.loader.spike_data`.
+            - Filters bursts and units as per threshold rules.
+            - Uses the three computational methods and plotting function
+            to replicate the notebook analysis in structured form.
         """
 
         zscore_distributions = defaultdict(list)
@@ -304,15 +319,205 @@ class OrchestratorPDx2:
         # Generate final plot
         BAMacPlots.plot_zscore_distributions(zscore_distributions, ordered_short_labels, control_subjects)
 
-    def run_similarity_analysis(self, dataset_key, config=None, window_size=3.0):
+    def run_similarity_analysis(self, dataset_key=None, config=None, window_size=3.0):
+        """
+                        raw spike trains ──► detect bursts ──► extract burst windows
+                                            │
+                                            ▼
+                                extract_bursts_from_raw_train
+                                            │
+                                            ▼
+                        build IFR slices (aligned to burst peak, same length)
+                                            │
+                                            ▼
+                    compute_similarity_matrix (cosine similarity of IFR slices)
+                                            │
+                                            ▼
+                            plot_burst_similarity_matrix
+        """
+        # 1) Load dataset
         if dataset_key not in self.spike_data:
             raise ValueError(f"Dataset '{dataset_key}' not found.")
         sd = self.spike_data[dataset_key]
-        detector = self.get_burst_detector(dataset_key, config)
-        _, _, _, peak_times, _, burst_windows = detector.compute_population_rate_and_bursts()
-        if not burst_windows:
+
+        # 2) Instantiate analysis object
+        bamac = BurstAnalysisMacro(sd.train, sd.metadata.get("fs", 10000), config)
+
+        # 3) Extract IFR matrices for bursts (aligned to peaks)
+        burst_stack, avg_matrix, peak_times, _ = bamac.compute_burst_aligned_ifr_matrix(
+            burst_window_s=window_size / 2  # half-window = 1.5s for a 3s total window
+        )
+        if burst_stack is None:
             print(f"[WARNING] No bursts detected for '{dataset_key}'.")
             return
-        aligned_trains = detector.extract_bursts_from_raw_train(sd.train, burst_windows)
-        sim_matrix = detector.compute_similarity_matrix(burst_windows=aligned_trains, peak_times=peak_times, window_size=window_size)
-        BAMacPlots.plot_burst_similarity_matrix(sim_matrix, title="Burst Similarity (Cosine)")
+
+        # 4) Compute similarity between bursts
+        sim_matrix = bamac.compute_similarity_matrix(burst_stack)
+
+        # 5) Plot similarity matrix
+        BAMacPlots.plot_burst_similarity_matrix(
+            sim_matrix, title=f"Burst Similarity (Cosine) - {dataset_key}"
+        )
+        return sim_matrix, burst_stack, peak_times
+    
+    def plot_combined_similarity_analysis(self, dataset_key=None):
+        """
+        Generates dual plots (similarity matrix + mean IFR) 
+        for one, multiple, or all datasets using precomputed results.
+        """
+        keys = [self._normalize_dataset_key(dataset_key)] if dataset_key is not None else list(self.spike_data.keys())
+        results_dict = {}
+
+        for key in keys:
+            analysis_res = self.analysis_results.get(key, None)
+            if analysis_res is None:
+                print(f"[WARNING] No precomputed similarity results for dataset '{key}'. Skipping.")
+                continue
+            sim_matrix, burst_stack, avg_matrix, peak_times = analysis_res
+            results_dict[key] = {
+                "sim_matrix": sim_matrix,
+                "burst_stack": burst_stack,
+                "avg_matrix": avg_matrix,
+                "peak_times": peak_times
+            }
+        if not results_dict:
+            print("[INFO] No valid datasets found for plotting.")
+            return
+        BAMacPlots.plot_dual_similarity_matrices(results_dict)
+
+    def run_burst_aligned_ifr_analysis(self, dataset_key=None, config=None, plot=True):
+        """
+        Wrapper: Compute and optionally plot burst-aligned IFR matrices.
+        """
+        dataset_key = self._normalize_dataset_key(dataset_key)
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMacro(sd.train, sd.metadata.get("fs", 10000), config)
+
+        burst_stack, avg_matrix, peak_times, peak_indices = analysis.compute_burst_aligned_ifr_matrix(
+            **(config or {})
+        )
+
+        if plot:
+            BAMacPlots.plot_burst_aligned_ifr_matrix(avg_matrix, peak_times)
+
+        return burst_stack, avg_matrix, peak_times, peak_indices
+
+    def run_peak_centered_ifr_segments(self, dataset_key=None, config=None, window_s=3.0, plot=True):
+        """
+        Wrapper: Extract IFR segments centered on each detected burst peak and optionally plot them.
+        """
+        dataset_key = self._normalize_dataset_key(dataset_key)
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMacro(sd.train, sd.metadata.get("fs", 10000), config)
+
+        stack, time_axis = analysis.get_peak_centered_ifr_segments(window_s=window_s)
+
+        if plot:
+            BAMacPlots.plot_peak_centered_ifr_segments(stack, time_axis)
+
+        return stack, time_axis
+
+    def run_population_ifr_with_bursts(self, dataset_key=None, config=None, plot=True):
+        """
+        Wrapper: Compute population IFR and highlight burst windows in plot.
+        """
+        dataset_key = self._normalize_dataset_key(dataset_key)
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMacro(sd.train, sd.metadata.get("fs", 10000), config)
+
+        rate_matrix, times, bursts = analysis.compute_population_ifr_with_bursts()
+
+        if plot:
+            BAMacPlots.plot_population_ifr_with_bursts(rate_matrix, times, bursts)
+        return rate_matrix, times, bursts
+
+    def run_pairwise_ifr_correlation(self, dataset_key=None, config=None, units=None, plot=True):
+        """
+        Computes pairwise IFR correlation matrix and optional heatmap
+        """
+        dataset_key = self._normalize_dataset_key(dataset_key)
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMacro(sd.train, sd.metadata.get("fs", 10000), config)
+
+        rate_matrix = analysis.compute_ifr_matrix()
+        corr_matrix = analysis.compute_pairwise_ifr_correlation(rate_matrix.T, units=units)
+
+        if plot:
+            BAMacPlots.plot_pairwise_ifr_correlation(corr_matrix)
+
+        return corr_matrix
+
+
+    def run_relative_unit_peak_times(self, dataset_key=None, config=None, plot=True):
+        """
+        Computes relative unit peak times for bursts and (optionally) plot histogram
+        """
+        dataset_key = self._normalize_dataset_key(dataset_key)
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMacro(sd.train, sd.metadata.get("fs", 10000), config)
+
+        # Step 1: Get population IFR with bursts
+        rate_matrix, times, bursts = analysis.compute_population_ifr_with_bursts()
+
+        # Step 2: Get burst peak times
+        _, _, peak_times, _ = analysis.compute_burst_aligned_ifr_matrix()
+
+        # Step 3: Compute relative peaks
+        rel_peaks = analysis.get_relative_unit_peak_times(rate_matrix, times, bursts, peak_times)
+
+        if plot:
+            BAMacPlots.plot_relative_unit_peak_times(rel_peaks)
+
+        return rel_peaks
+
+# -----------------------------------------------------------------------------------
+#           LEVEL 3: BURST ANALYSIS MICRO- Single Bursts + Unit Relationships
+# -----------------------------------------------------------------------------------
+
+    def visualize_sorted_burst_ifr(self, dataset_key=None, burst_idx=0, min_spikes=2, save_path=None):
+        """
+        Computes / graphs sorted IFR activity for a single burst
+
+        Method:
+            1. Computes the global IFR matrix and burst windows for the dataset.
+            2. Extracts and sorts units active during the specified burst.
+            3. Plots the resulting burst IFR heatmap.
+
+        Args:
+            dataset_key (str, optional):
+                Name of the dataset to analyze. Defaults to the main dataset if None.
+            burst_idx (int):
+                Index of the burst to visualize (0-based).
+            min_spikes (int):
+                Minimum spike threshold to include a unit in the plot.
+            save_path (str, optional):
+                If provided, saves the plot to this location instead of displaying it.
+
+        Outputs:
+            fig (matplotlib.figure.Figure or None):
+                Figure handle if plotting is successful, otherwise None.
+        """
+        dataset_key = self._normalize_dataset_key(dataset_key)
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMacro(sd.train, sd.metadata.get("fs", 10000))
+
+        # Compute full IFR matrix and burst windows
+        rate_matrix, times, bursts = analysis.compute_population_ifr_with_bursts()
+
+        # Extract and sort IFR activity for the selected burst
+        sorted_burst_matrix, sorted_units, burst_time_axis = analysis.prepare_sorted_ifr_matrix_for_burst(
+            rate_matrix,
+            times,
+            burst_idx,
+            bursts,
+            min_spikes=min_spikes
+        )
+        # Generate heatmap
+        fig = BAMicPlots.plot_sorted_ifr_for_burst(
+            sorted_burst_matrix,
+            sorted_units,
+            burst_time_axis,
+            dataset_key=dataset_key,
+            save_path=save_path
+        )
+        return fig
