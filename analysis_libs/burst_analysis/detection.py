@@ -14,7 +14,7 @@ from scipy.signal import find_peaks
 """
 BurstDetection has three different detectors. Used together, they can provide a multi-layered view on how subclasses of 
 putative neurons interact across time and experimental conditions. Each integrates with a stats 
-toolkit for feature extraction and easy visualization via plots.py. 
+toolkit for feature extraction and easy visualization via plotting.py. 
 """
 
 import numpy as np
@@ -40,7 +40,7 @@ class BurstDetection:
             peaks (np.ndarray): Indices of peak burst times in the rate trace.
             bursts (List[Tuple[int, int]]): Start and end indices of each burst.
 
-        Reverses the loop to match the edge and peak indices back to their absolute times in 'train'
+        Matches the edge and peak indices back to their absolute times in 'train'
         Outputs all stored tuples above, plus:
             peak_times (List[float]): Peak times in seconds for each detected burst.
             burst_windows (List[Tuple[float, float]]): Start and end times in seconds for each burst.
@@ -209,7 +209,7 @@ class BurstDetection:
         """
         Compute metrics from population bursts and indices (the outputs of compute_population_rate_and_bursts).
         Works with RMS-based methods (needs: times, smoothed, peaks, bursts) for these proportionality stats.
-        Expanding to compute all below metrics using real numbers from raw spike trains returned as peak_times and burst_windows.
+        Expanding to compute all below metrics using absolute spike times returned as peak_times and burst_windows.
         """
         bin_size_s = self.config.get("bin_size_ms", 10) / 1000.0
         spike_trains = self.trains
