@@ -1,10 +1,10 @@
 import numpy as np 
 import pandas as pd
 import matplotlib.pyplot as plt 
-from analysis_libs.burst_analysis.loader import SpikeDataLoader
-from analysis_libs.burst_analysis.detector import BurstDetection
-from analysis_libs.burst_analysis.plots import plot_overlay_raster_population 
-from analysis_libs.burst_analysis.plots import (plot_neuron_counts, 
+from burst_analysis.loading import SpikeDataLoader
+from burst_analysis.detection import BurstDetection
+from burst_analysis.plotting import plot_overlay_raster_population 
+from burst_analysis.plotting import (plot_neuron_counts, 
                                                 plot_overlay_raster_dim_bursts, 
                                                 plot_overlay_raster_isi_bursts, 
                                                 plot_burst_similarity_matrix) 

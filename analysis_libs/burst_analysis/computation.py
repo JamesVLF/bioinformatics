@@ -1,9 +1,9 @@
 import pandas as pd
 from pathlib import Path
 import numpy as np
-from burst_analysis.plots import plot_raster
-from burst_analysis.plots import plot_population_rate
-from burst_analysis.detector import BurstDetection
+from burst_analysis.plotting import plot_raster
+from burst_analysis.plotting import plot_population_rate
+from burst_analysis.detection import BurstDetection
 
 def update_parkinsons_exp_metrics(trains_by_condition, current_df=None):
     new_data = pd.DataFrame([
