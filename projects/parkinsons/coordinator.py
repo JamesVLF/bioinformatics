@@ -49,7 +49,7 @@ class OrchestratorPDx2:
             return list(dataset_key)
         else:
             raise ValueError("dataset_key must be None, str, or list/tuple of strings.")
-
+        
 
     def get_unit_info(self, dataset_name=None):
         return self.loader.get_unit_info(dataset_name)
@@ -175,29 +175,24 @@ class OrchestratorPDx2:
                                             dataset_keys=None, ordered_short_labels=None,
                                             save=False, output_path=None):
         """
-        Computes per-unit burst participation fractions across multiple datasets
-        and generates a violin plot comparing CONTROL vs TREATED groups.
+        Method:
+            1. Computes per-unit burst participation fractions across multiple datasets;
+            2. Generates a violin plot comparing control and drugged groups.
 
         Args:
-        sample_configs : dict
-            Dictionary mapping dataset identifiers (e.g., 'S1', 'S2') to analysis configuration objects
-            used for burst detection computations.
-        control_subjects : set, optional
-            Set of subject IDs (e.g., {'s1','s2','s3'}) considered CONTROL group. 
-            Remaining datasets are labeled TREATED. Default=None → no CONTROL grouping.
-        dataset_keys : list, optional
-            Specific dataset keys to analyze. Defaults to all loaded datasets.
-        ordered_short_labels : list of str, optional
-            Explicit order of x-axis sample labels (e.g., ['d-6s1','d1s1',...]).
-            If None, ordering follows dataset key sorting.
-        save : bool, optional
-            If True, saves the resulting violin plot as PNG.
-        output_path : str, optional
-            File path to save the plot (used only if save=True).
+            sample_configs : dict that  maps dataset identifiers (like 'S1', 'S2'...) to analysis configuration objects
+                for burst detection computations.
+            control_subjects : set (optional) of subject IDs (like {'s1','s2','s3'}) for the CONTROL group. 
+                Remaining datasets get labeled TREATED. If Default=None → no CONTROL grouping.
+            dataset_keys : list (optional) of keys to analyze. Defaults to all loaded datasets.
+            ordered_short_labels : list of str (optional, but in explicit order) of x-axis sample labels (like ['d-6s1','d1s1',...]).
+                If None → ordering follows dataset key sorting.
+            save : bool, optional
+                If True → saves the plot as PNG.
+            output_path : str (used only if save=True).
 
         Outputs:
-        grouped_participation : dict
-            Mapping of 'GROUP_dataset' → list of per-unit participation fractions.
+            grouped_participation : dict mapping of 'GROUP_dataset' → list of per-unit participation fractions.
         """
 
         # Default args
@@ -208,7 +203,7 @@ class OrchestratorPDx2:
         # --- COMPUTATION LOOP ---
         for dataset_key in sorted(dataset_keys):
             if dataset_key not in self.spike_data:
-                print(f"[SKIP] Dataset '{dataset_key}' not found in loaded data.")
+                print(f"Dataset '{dataset_key}' not found in loaded data. Skipping.")
                 continue
 
             # Normalize naming and extract subject ID
@@ -256,27 +251,22 @@ class OrchestratorPDx2:
     
     def run_burst_rank_order_analysis(bb, sample_configs, ordered_short_labels, control_subjects):
         """
-       This function has 4 components: 
-            1. Builds peak time matrices for each dataset.
-            2. Computes Spearman rank correlations and z-scores.
-            3. Collects z-score distributions by condition.
-            4. Generates violin plots of the results.
+       Method: 
+            1. Builds peak time matrices for each dataset
+            2. Computes Spearman rank correlations and z-scores
+            3. Collects z-score distributions by condition
+            4. Generates violin plots of the results
 
         Args:
-            bb : object
-                Analysis backend object with loaded spike data and helper methods.
-            sample_configs : dict
-                Configuration mapping for datasets (keyed by sample label).
-            ordered_short_labels : list of str
-                Dataset label order for plotting.
-            control_subjects : set
-                Subject IDs considered CONTROL for grouping.
+            orch: object of backend analysis  with loaded spike data and helper methods
+            sample_configs: dict mapping of configurations for datasets (keyed by sample label)
+            ordered_short_labels: list of str dataset labels ordered for plotting
+            control_subjects: set of IDs designated as CONTROL for grouping
 
         Notes:
-            - Iterates through all datasets in `bb.loader.spike_data`.
-            - Filters bursts and units as per threshold rules.
-            - Uses the three computational methods and plotting function
-            to replicate the notebook analysis in structured form.
+            - Iterates through all datasets in `orch.loader.spike_data`
+            - Filters bursts and units in accord with threshold rules
+            - Uses 3 methods and plotting functions for the notebook UI function
         """
 
         zscore_distributions = defaultdict(list)
@@ -316,15 +306,14 @@ class OrchestratorPDx2:
             label = f"{condition}_{parts}"
             zscore_distributions[label].extend(flat_zscores.tolist())
 
-        # Generate final plot
         BAMacPlots.plot_zscore_distributions(zscore_distributions, ordered_short_labels, control_subjects)
 
     def run_similarity_analysis(self, dataset_key=None, config=None, window_size=3.0):
         """
-                        raw spike trains ──► detect bursts ──► extract burst windows
+                        spike trains ──► detect bursts ──► extract burst windows
                                             │
                                             ▼
-                                extract_bursts_from_raw_train
+                                extract_bursts_from_train
                                             │
                                             ▼
                         build IFR slices (aligned to burst peak, same length)
@@ -335,26 +324,26 @@ class OrchestratorPDx2:
                                             ▼
                             plot_burst_similarity_matrix
         """
-        # 1) Load dataset
+        # ------- (1) Load dataset -------------
         if dataset_key not in self.spike_data:
             raise ValueError(f"Dataset '{dataset_key}' not found.")
         sd = self.spike_data[dataset_key]
 
-        # 2) Instantiate analysis object
+        # -------- (2) Instantiate analysis object ----------
         bamac = BurstAnalysisMacro(sd.train, sd.metadata.get("fs", 10000), config)
 
-        # 3) Extract IFR matrices for bursts (aligned to peaks)
+        # ---------- (3) Extract IFR matrices for bursts (aligned to peaks) -------
         burst_stack, avg_matrix, peak_times, _ = bamac.compute_burst_aligned_ifr_matrix(
             burst_window_s=window_size / 2  # half-window = 1.5s for a 3s total window
         )
         if burst_stack is None:
-            print(f"[WARNING] No bursts detected for '{dataset_key}'.")
+            print(f" No bursts detected for '{dataset_key}'.")
             return
 
-        # 4) Compute similarity between bursts
+        # ------- (4) Compute similarity between bursts ----------
         sim_matrix = bamac.compute_similarity_matrix(burst_stack)
 
-        # 5) Plot similarity matrix
+        # ----- (5) Plot similarity matrix ---------
         BAMacPlots.plot_burst_similarity_matrix(
             sim_matrix, title=f"Burst Similarity (Cosine) - {dataset_key}"
         )
@@ -363,7 +352,7 @@ class OrchestratorPDx2:
     def plot_combined_similarity_analysis(self, dataset_key=None):
         """
         Generates dual plots (similarity matrix + mean IFR) 
-        for one, multiple, or all datasets using precomputed results.
+        for one, multiple, or all datasets using precomputed results
         """
         keys = [self._normalize_dataset_key(dataset_key)] if dataset_key is not None else list(self.spike_data.keys())
         results_dict = {}
@@ -371,7 +360,7 @@ class OrchestratorPDx2:
         for key in keys:
             analysis_res = self.analysis_results.get(key, None)
             if analysis_res is None:
-                print(f"[WARNING] No precomputed similarity results for dataset '{key}'. Skipping.")
+                print(f" No precomputed similarity results for dataset '{key}'. Skipping.")
                 continue
             sim_matrix, burst_stack, avg_matrix, peak_times = analysis_res
             results_dict[key] = {
@@ -381,13 +370,13 @@ class OrchestratorPDx2:
                 "peak_times": peak_times
             }
         if not results_dict:
-            print("[INFO] No valid datasets found for plotting.")
+            print(" No valid datasets found for plotting.")
             return
         BAMacPlots.plot_dual_similarity_matrices(results_dict)
 
     def run_burst_aligned_ifr_analysis(self, dataset_key=None, config=None, plot=True):
         """
-        Wrapper: Compute and optionally plot burst-aligned IFR matrices.
+        Computes and (optionally) plots burst-aligned IFR matrices
         """
         dataset_key = self._normalize_dataset_key(dataset_key)
         sd = self.spike_data[dataset_key]
@@ -404,7 +393,7 @@ class OrchestratorPDx2:
 
     def run_peak_centered_ifr_segments(self, dataset_key=None, config=None, window_s=3.0, plot=True):
         """
-        Wrapper: Extract IFR segments centered on each detected burst peak and optionally plot them.
+        Extracts IFR segments centered on each detected burst peak and (optionally) plots them
         """
         dataset_key = self._normalize_dataset_key(dataset_key)
         sd = self.spike_data[dataset_key]
@@ -419,7 +408,7 @@ class OrchestratorPDx2:
 
     def run_population_ifr_with_bursts(self, dataset_key=None, config=None, plot=True):
         """
-        Wrapper: Compute population IFR and highlight burst windows in plot.
+        Computes population IFR and highlights burst windows in plot
         """
         dataset_key = self._normalize_dataset_key(dataset_key)
         sd = self.spike_data[dataset_key]
@@ -450,19 +439,19 @@ class OrchestratorPDx2:
 
     def run_relative_unit_peak_times(self, dataset_key=None, config=None, plot=True):
         """
-        Computes relative unit peak times for bursts and (optionally) plot histogram
+        Computes relative unit peak times for bursts and (optionally) plots histogram
         """
         dataset_key = self._normalize_dataset_key(dataset_key)
         sd = self.spike_data[dataset_key]
         analysis = BurstAnalysisMacro(sd.train, sd.metadata.get("fs", 10000), config)
 
-        # Step 1: Get population IFR with bursts
+        # ------ (1) Get population IFR with bursts --------
         rate_matrix, times, bursts = analysis.compute_population_ifr_with_bursts()
 
-        # Step 2: Get burst peak times
+        # ------ (2) Get burst peak times ---------
         _, _, peak_times, _ = analysis.compute_burst_aligned_ifr_matrix()
 
-        # Step 3: Compute relative peaks
+        # ----- (3) Compute relative peaks --------
         rel_peaks = analysis.get_relative_unit_peak_times(rate_matrix, times, bursts, peak_times)
 
         if plot:
@@ -479,23 +468,18 @@ class OrchestratorPDx2:
         Computes / graphs sorted IFR activity for a single burst
 
         Method:
-            1. Computes the global IFR matrix and burst windows for the dataset.
-            2. Extracts and sorts units active during the specified burst.
-            3. Plots the resulting burst IFR heatmap.
+            1. Computes the global IFR matrix and burst windows for the dataset
+            2. Extracts and sorts units active during the specified burst
+            3. Plots the resulting burst IFR heatmap
 
         Args:
-            dataset_key (str, optional):
-                Name of the dataset to analyze. Defaults to the main dataset if None.
-            burst_idx (int):
-                Index of the burst to visualize (0-based).
-            min_spikes (int):
-                Minimum spike threshold to include a unit in the plot.
-            save_path (str, optional):
-                If provided, saves the plot to this location instead of displaying it.
+            dataset_key: str (optional) Defaults to the main dataset if None
+            burst_idx: int index of the burst to visualize (0-based)
+            min_spikes: int minimum spike threshold by which to include a unit in the plot
+            save_path: str (optional) saves plot to that location instead of displaying it
 
         Outputs:
-            fig (matplotlib.figure.Figure or None):
-                Figure handle if plotting is successful, otherwise None.
+            matplotlib.figure.Figure handle if plotting is successful, otherwise None
         """
         dataset_key = self._normalize_dataset_key(dataset_key)
         sd = self.spike_data[dataset_key]
