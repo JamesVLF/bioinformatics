@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 from burst_analysis.loading import SpikeDataLoader
 from burst_analysis.detection import BurstDetection
-from burst_analysis.computation import BurstAnalysisMacro
+from burst_analysis.computation import BurstAnalysisMacro, BurstAnalysisMicro
 from burst_analysis.plotting import BurstDetectionPlots, BAMacPlots, BAMicPlots 
 
 class OrchestratorPDx2:
@@ -214,19 +214,19 @@ class OrchestratorPDx2:
             # Get configuration
             config = sample_configs.get(f"S{sample_num}")
             if config is None:
-                print(f"[SKIP] No config for dataset {dataset_key}")
+                print(f"No config for dataset {dataset_key}. Skipping.")
                 continue
 
             # Initialize burst detector and run population burst detection
             detector = self.get_burst_detector(dataset_key, config)
             result = detector.compute_population_rate_and_bursts()
             if result is None or result[-1] is None:
-                print(f"[SKIP] Burst computation failed for {dataset_key}")
+                print(f"Burst computation failed for {dataset_key}. Skipping.")
                 continue
 
             burst_windows = result[-1]
             if not burst_windows:
-                print(f"[NOTE] No bursts found in {dataset_key}")
+                print(f"No bursts found in {dataset_key}")
                 continue
 
             # Compute unit participation using BurstAnalysisMacro
@@ -238,7 +238,7 @@ class OrchestratorPDx2:
             group = "CONTROL" if subject_label in control_subjects else "TREATED"
             label = f"{group}_{parts}"
             grouped_participation[label].extend(fractions)
-            print(f"[DONE] {dataset_key}: {len(burst_windows)} bursts, {len(fractions)} units")
+            print(f"DONE: {dataset_key}: {len(burst_windows)} bursts, {len(fractions)} units")
 
         # --- PLOTTING ---
         BAMacPlots.plot_violin_burst_participation(
@@ -504,4 +504,525 @@ class OrchestratorPDx2:
             dataset_key=dataset_key,
             save_path=save_path
         )
+        return fig
+    
+
+    def run_backbone_detection(self, dataset_key=None,
+                           burst_results=None,
+                           metrics_df=None,
+                           min_spikes_per_burst=2,
+                           min_fraction_bursts=1.0,
+                           min_total_spikes=30):
+        """
+        Classifies units into backbone and non-rigid groups using cached burst data.
+
+        Method:
+            (1) Retrieves burst_windows from either:
+                    - burst_results dict (session cache), or
+                    - metrics DataFrame (loaded from previous runs).
+            (2) Uses BurstAnalysisMacro.get_backbone_units() to classify units.
+            (3) Prints summary of backbone vs non-rigid units.
+
+        Args:
+            dataset_key (str): Dataset key to analyze.
+            burst_results (dict, optional): Cached burst detection outputs.
+            metrics_df (pd.DataFrame, optional): DataFrame with 'dataset_key' and 'burst_windows' columns.
+            min_spikes_per_burst (int): Minimum spikes per burst to count as active.
+            min_fraction_bursts (float): Fraction of bursts required to classify as backbone.
+            min_total_spikes (int): Minimum total spikes across all bursts.
+
+        Outputs:
+            backbone_units (List[int]): Unit indices classified as backbone.
+            non_rigid_units (List[int]): Unit indices classified as non-rigid.
+        """
+        dataset_key = self._normalize_dataset_key(dataset_key)
+
+        # --- Retrieve cached burst windows ---
+        burst_windows = None
+
+        if burst_results and dataset_key in burst_results:
+            burst_windows = burst_results[dataset_key].get("burst_windows")
+
+        elif metrics_df is not None:
+            row = metrics_df[metrics_df["dataset_key"] == dataset_key]
+            if not row.empty:
+                burst_windows = row["burst_windows"].values[0]
+
+        if not burst_windows:
+            print(f"No cached bursts found for dataset '{dataset_key}'.")
+            return [], []
+
+        # --- Load spike trains for dataset ---
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMicro(sd.train, fs=sd.metadata.get("fs", 10000))
+
+        # --- Classify units ---
+        backbone_units, non_rigid_units = analysis.get_backbone_units(
+            burst_windows,
+            min_spikes_per_burst=min_spikes_per_burst,
+            min_fraction_bursts=min_fraction_bursts,
+            min_total_spikes=min_total_spikes
+        )
+
+        # --- Print summary ---
+        print(f"\n[Backbone Detection] Dataset: {dataset_key}")
+        print(f"Detected {len(backbone_units)} backbone units: {backbone_units}")
+        print(f"Detected {len(non_rigid_units)} non-rigid units: {non_rigid_units}")
+
+        return backbone_units, non_rigid_units
+
+    
+# ------------------------------
+# Figure 3 Panel Wrapper Methods
+# ------------------------------
+    
+    def plot_figure3_panel_a(self, dataset_key=None, unit_indices=[0, 1, 2],
+                         burst_idx=0, burst_windows=None,
+                         bin_size=0.001,  # <-- seconds
+                         save=False, save_path=None, config=None):
+        """
+        Wrapper for Figure 3 Panel A.
+        Allows use of precomputed burst windows to avoid rerunning detection.
+
+        Args:
+            dataset_key (str): Dataset key.
+            unit_indices (list[int]): Units to visualize.
+            burst_idx (int): Index of burst to plot (0-based).
+            burst_windows (list[tuple], optional): Precomputed burst windows [(start, end), ...].
+            bin_size (float): Time bin width in seconds for IFR calculation (default=0.001 → 1 ms).
+            save (bool): Save figure if True.
+            save_path (str): Path to save figure if save=True.
+            config (dict): Burst detection config if detection needs to be run.
+
+        Returns:
+            matplotlib.figure.Figure or None
+        """
+
+        dataset_key = self._normalize_dataset_key(dataset_key) or self.list_datasets()[0]
+        if dataset_key not in self.spike_data:
+            print(f"Dataset '{dataset_key}' not found.")
+            return None
+        sd = self.spike_data[dataset_key]
+
+        # Use cached burst windows if provided
+        if burst_windows is None:
+            detector = self.get_burst_detector(dataset_key, config)
+            result = detector.compute_population_rate_and_bursts()
+            if result is None or len(result) < 6 or not result[-1]:
+                print(f"No bursts detected for dataset '{dataset_key}'.")
+                return None
+            burst_windows = result[-1]
+
+        if burst_idx >= len(burst_windows):
+            print(f"Burst index {burst_idx} out of range. Dataset has {len(burst_windows)} bursts.")
+            return None
+
+        burst_start, burst_end = burst_windows[burst_idx]
+
+        # Compute IFR for this burst with user-defined bin size
+        analysis = BurstAnalysisMacro(sd.train, fs=sd.metadata.get("fs", 10000), config=config)
+        time_axis, ifr_matrix = analysis.compute_unit_ifr_for_burst_window(
+            (burst_start, burst_end),
+            bin_size=bin_size
+        )
+
+        # Generate plot
+        fig = plt.figure(figsize=(8, 4))
+        plt.close(fig)
+
+        BAMicPlots.plot_single_burst_ifr_traces(
+            burst_time=time_axis,
+            ifr_matrix=ifr_matrix,
+            unit_indices=unit_indices,
+            spike_trains=sd.train,
+            burst_start=burst_start,
+            burst_end=burst_end,
+            save_path=save_path
+        )
+        return fig
+
+    def plot_figure3_panel_b(self, dataset_key=None, unit_indices=[0, 1, 2],
+                         burst_windows=None, burst_peaks=None,
+                         bin_size=0.005, save_path=None, config=None):
+        """
+        
+        Creates an overlay plot of selected units with IFR traces for all bursts.
+
+        Args:
+            dataset_key (str): Dataset key.
+            unit_indices (list[int]): Units to plot.
+            burst_windows (list[tuple], optional): Precomputed burst windows.
+            burst_peaks (list[float], optional): Precomputed burst peak times (s).
+            bin_size (float): Time bin width in seconds (default=5 ms).
+            save (bool): If True, saves the figure.
+            save_path (str): Path for saving the figure.
+            config (dict): Burst detection config if detection needs to be run.
+
+        Returns:
+            matplotlib.figure.Figure or None
+        """
+
+        dataset_key = self._normalize_dataset_key(dataset_key) or self.list_datasets()[0]
+        if dataset_key not in self.spike_data:
+            print(f"Dataset '{dataset_key}' not found.")
+            return None
+        sd = self.spike_data[dataset_key]
+
+        # Use cached detection results if available
+        if burst_windows is None or burst_peaks is None:
+            detector = self.get_burst_detector(dataset_key, config)
+            result = detector.compute_population_rate_and_bursts()
+            if result is None or len(result) < 6 or not result[-1]:
+                print(f"No bursts detected for dataset '{dataset_key}'.")
+                return None
+            burst_windows = result[-1]
+            burst_peaks = result[3]  # list of peak times
+
+        # Compute IFR trials for all bursts ONCE
+        analysis = BurstAnalysisMacro(sd.train, fs=sd.metadata.get("fs", 10000), config=config)
+        time_axis, ifr_trials = analysis.compute_burst_aligned_ifr_trials(
+            burst_windows, burst_peaks, bin_size=bin_size
+        )
+
+        # Keep only selected units and remove empty trials
+        trials_clean = {u: ifr_trials[u][~(ifr_trials[u] == 0).all(axis=1)]
+                        for u in unit_indices if u in ifr_trials}
+
+        # Generate ONE combined figure
+        fig = plt.figure(figsize=(8, 4))
+        plt.close(fig)
+
+        BAMicPlots.plot_average_burst_aligned_ifr(
+            time_axis,
+            trials_clean,
+            selected_units=unit_indices,
+            save_path=save_path
+        )
+        return fig
+
+    def plot_figure3_panel_c(self, dataset_key=None,
+                         burst_results=None,
+                         config=None,
+                         min_spikes_per_burst=2,
+                         min_fraction_bursts=0.8,
+                         min_total_spikes=30,
+                         max_lag=0.35,
+                         save_path=None):
+        """
+        Optimized wrapper for Figure 3 Panel C.
+
+        Method:
+            (1) Retrieve cached bursts.
+            (2) Identify backbone and non-rigid units.
+            (3) Compute FFT-based pairwise IFR correlations (5 ms bins, burst-limited).
+            (4) Plot heatmap (backbone units first, then non-rigid units) with grayscale colormap
+                and red separators, matching published Panel C style.
+
+        Args:
+            dataset_key (str): Dataset key for analysis.
+            burst_results (dict): Cached burst detection results.
+            config (dict, optional): Analysis configuration.
+            min_spikes_per_burst (int): Spike threshold for activity per burst.
+            min_fraction_bursts (float): Fraction of bursts required for backbone classification.
+            min_total_spikes (int): Minimum total spikes to classify as backbone.
+            max_lag (float): Maximum lag (s) for cross-correlation search.
+            save_path (str, optional): Path to save Panel C plot.
+
+        Outputs:
+            fig (matplotlib.figure.Figure): Handle to generated heatmap figure.
+        """
+        import os
+        dataset_key = self._normalize_dataset_key(dataset_key)
+        if dataset_key not in self.spike_data:
+            print(f"Dataset '{dataset_key}' not found.")
+            return None
+
+        # Retrieve cached bursts
+        if burst_results is None or dataset_key not in burst_results:
+            print(f"No cached bursts found for dataset '{dataset_key}'.")
+            return None
+        burst_windows = burst_results[dataset_key]["burst_windows"]
+        if not burst_windows:
+            print("No bursts detected for this dataset.")
+            return None
+
+        # Load spike data
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMicro(sd.train, fs=sd.metadata.get("fs", 10000), config=config)
+
+        # Identify backbone vs non-rigid units
+        backbone_units, non_rigid_units = analysis.get_backbone_units(
+            burst_windows,
+            min_spikes_per_burst=min_spikes_per_burst,
+            min_fraction_bursts=min_fraction_bursts,
+            min_total_spikes=min_total_spikes
+        )
+        all_units = backbone_units + non_rigid_units
+        if not all_units:
+            print("No units found for correlation analysis.")
+            return None
+
+        print(f"[Panel C Optimized] Backbone: {len(backbone_units)}, Non-rigid: {len(non_rigid_units)}")
+
+        # Compute FFT-based cross-correlation
+        cc_matrix, _ = analysis.compute_pairwise_ifr_cross_correlation(
+            units=all_units,
+            fs=sd.metadata.get("fs", 10000),
+            max_lag=max_lag,
+            burst_windows=burst_windows,
+            bin_size=0.005  # 5 ms bins
+        )
+
+        # Ensure output directory exists
+        if save_path:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        # Plot heatmap with target figure styling
+        fig = BAMicPlots.plot_panel_c(
+            cc_matrix=cc_matrix,
+            backbone_units=list(range(len(backbone_units))),  # pass backbone indices only
+            save_path=save_path
+        )
+
+        return fig
+
+    def plot_figure3_panel_d(self, dataset_key=None,
+                         burst_results=None,
+                         config=None,
+                         min_spikes_per_burst=2,
+                         min_fraction_bursts=0.8,
+                         min_total_spikes=30,
+                         max_lag=0.35,
+                         save_path=None):
+        """
+        Optimized wrapper for Figure 3 Panel D (lag times).
+
+        Method:
+            (1) Retrieve cached bursts.
+            (2) Identify backbone and non-rigid units.
+            (3) Compute FFT-based lag time matrix (burst-limited, 5 ms bins).
+            (4) Plot diverging red-blue heatmap with black separators.
+
+        Args:
+            dataset_key (str): Dataset key for analysis.
+            burst_results (dict): Cached burst detection results.
+            config (dict, optional): Analysis configuration.
+            min_spikes_per_burst (int): Spike threshold for burst participation.
+            min_fraction_bursts (float): Fraction of bursts required for backbone classification.
+            min_total_spikes (int): Total spikes threshold for backbone units.
+            max_lag (float): Maximum lag window in seconds for CC.
+            save_path (str, optional): Path to save figure.
+
+        Outputs:
+            fig (matplotlib.figure.Figure): Heatmap figure handle.
+        """
+        import os
+        dataset_key = self._normalize_dataset_key(dataset_key)
+        if dataset_key not in self.spike_data:
+            print(f"Dataset '{dataset_key}' not found.")
+            return None
+
+        if burst_results is None or dataset_key not in burst_results:
+            print(f"No cached bursts found for dataset '{dataset_key}'.")
+            return None
+        burst_windows = burst_results[dataset_key]["burst_windows"]
+        if not burst_windows:
+            print("No bursts detected for this dataset.")
+            return None
+
+        # Load spike data
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMicro(sd.train, fs=sd.metadata.get("fs", 10000), config=config)
+
+        # Identify backbone and non-rigid units
+        backbone_units, non_rigid_units = analysis.get_backbone_units(
+            burst_windows,
+            min_spikes_per_burst=min_spikes_per_burst,
+            min_fraction_bursts=min_fraction_bursts,
+            min_total_spikes=min_total_spikes
+        )
+        all_units = backbone_units + non_rigid_units
+        if not all_units:
+            print("No units found for lag correlation analysis.")
+            return None
+
+        print(f"[Panel D Optimized] Backbone: {len(backbone_units)}, Non-rigid: {len(non_rigid_units)}")
+
+        # Compute optimized cross-correlation lag matrix
+        _, lag_matrix = analysis.compute_pairwise_ifr_cross_correlation(
+            units=all_units,
+            fs=sd.metadata.get("fs", 10000),
+            max_lag=max_lag,
+            burst_windows=burst_windows,
+            bin_size=0.005
+        )
+
+        # Ensure output directory exists
+        if save_path:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        # Plot heatmap in target style
+        fig = BAMicPlots.plot_panel_d(
+            lag_matrix=lag_matrix,
+            backbone_units=list(range(len(backbone_units))),
+            save_path=save_path
+        )
+
+        return fig
+    
+    def plot_figure3_panel_e(self, dataset_key=None,
+                         burst_results=None,
+                         config=None,
+                         min_spikes_per_burst=2,
+                         min_fraction_bursts=0.8,
+                         min_total_spikes=30,
+                         max_lag=0.35,
+                         save_path=None):
+        """
+        Wrapper for Figure 3 Panel E.
+
+        Method:
+            (1) Retrieve cached burst windows.
+            (2) Identify backbone and non-rigid units.
+            (3) Compute full pairwise cross-correlation matrix (backbone + nonrigid).
+            (4) Separate CC values into BB-BB, BB-NR, NR-NR categories.
+            (5) Plot violin plot comparing distributions.
+
+        Args:
+            dataset_key (str): Dataset key for analysis.
+            burst_results (dict): Cached burst detection results.
+            config (dict, optional): Analysis configuration.
+            min_spikes_per_burst (int): Minimum spikes per burst threshold.
+            min_fraction_bursts (float): Fraction of bursts required for backbone.
+            min_total_spikes (int): Total spikes threshold for backbone.
+            max_lag (float): Maximum lag window in seconds.
+            save_path (str, optional): Path to save violin plot figure.
+
+        Outputs:
+            fig (matplotlib.figure.Figure): Handle to violin plot figure.
+        """
+        dataset_key = self._normalize_dataset_key(dataset_key)
+        if dataset_key not in self.spike_data:
+            print(f"Dataset '{dataset_key}' not found.")
+            return None
+
+        if burst_results is None or dataset_key not in burst_results:
+            print(f"No cached bursts found for dataset '{dataset_key}'.")
+            return None
+        burst_windows = burst_results[dataset_key]["burst_windows"]
+        if not burst_windows:
+            print("No bursts detected for this dataset.")
+            return None
+
+        # Load spike data
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMicro(sd.train, fs=sd.metadata.get("fs", 10000), config=config)
+
+        # Identify backbone and non-rigid units
+        backbone_units, non_rigid_units = analysis.get_backbone_units(
+            burst_windows,
+            min_spikes_per_burst=min_spikes_per_burst,
+            min_fraction_bursts=min_fraction_bursts,
+            min_total_spikes=min_total_spikes
+        )
+
+        print(f"[Panel E] Backbone units: {len(backbone_units)}, Non-rigid units: {len(non_rigid_units)}")
+
+        # Compute full CC matrix for all units (backbone + nonrigid)
+        cc_matrix, _ = analysis.compute_pairwise_ifr_cross_correlation(
+            units=backbone_units + non_rigid_units,
+            fs=sd.metadata.get("fs", 10000),
+            max_lag=max_lag
+        )
+
+        # Separate pair types
+        bb_pairs, bn_pairs, nn_pairs = analysis.separate_unit_pair_types(
+            cc_matrix=cc_matrix,
+            backbone_units=list(range(len(backbone_units)))  # indices in reordered list
+        )
+
+        # Plot violin plot
+        fig = BAMicPlots.plot_panel_e(bb_pairs, bn_pairs, nn_pairs, save_path=save_path)
+
+        return fig
+
+    def plot_figure3_panel_f(self, dataset_key=None,
+                         burst_results=None,
+                         config=None,
+                         min_spikes_per_burst=2,
+                         min_fraction_bursts=0.8,
+                         min_total_spikes=30,
+                         max_lag=0.35,
+                         save_path=None):
+        """
+        Wrapper for Figure 3 Panel F.
+
+        Method:
+            (1) Retrieve cached bursts.
+            (2) Identify backbone vs non-rigid units.
+            (3) Compute pairwise CC matrix for all units.
+            (4) Extract BB-BB pairs and all pairs.
+            (5) Plot histogram of CC values (log scale) and mark mean BB-BB score.
+
+        Args:
+            dataset_key (str): Dataset key for analysis.
+            burst_results (dict): Cached burst detection results.
+            config (dict, optional): Analysis configuration.
+            min_spikes_per_burst (int): Spike threshold for activity per burst.
+            min_fraction_bursts (float): Fraction of bursts for backbone classification.
+            min_total_spikes (int): Total spike count for backbone classification.
+            max_lag (float): Max lag in seconds for CC computation.
+            save_path (str, optional): Path to save Panel F plot.
+
+        Outputs:
+            fig (matplotlib.figure.Figure): Histogram figure for Panel F.
+        """
+        dataset_key = self._normalize_dataset_key(dataset_key)
+        if dataset_key not in self.spike_data:
+            print(f"Dataset '{dataset_key}' not found.")
+            return None
+
+        if burst_results is None or dataset_key not in burst_results:
+            print(f"No cached bursts found for dataset '{dataset_key}'.")
+            return None
+        burst_windows = burst_results[dataset_key]["burst_windows"]
+        if not burst_windows:
+            print("No bursts detected for this dataset.")
+            return None
+
+        # Load spike data
+        sd = self.spike_data[dataset_key]
+        analysis = BurstAnalysisMicro(sd.train, fs=sd.metadata.get("fs", 10000), config=config)
+
+        # Identify backbone units
+        backbone_units, non_rigid_units = analysis.get_backbone_units(
+            burst_windows,
+            min_spikes_per_burst=min_spikes_per_burst,
+            min_fraction_bursts=min_fraction_bursts,
+            min_total_spikes=min_total_spikes
+        )
+
+        print(f"[Panel F] Backbone units: {len(backbone_units)}, Non-rigid units: {len(non_rigid_units)}")
+
+        # Compute full CC matrix
+        all_units = backbone_units + non_rigid_units
+        cc_matrix, _ = analysis.compute_pairwise_ifr_cross_correlation(
+            units=all_units,
+            fs=sd.metadata.get("fs", 10000),
+            max_lag=max_lag
+        )
+
+        # Extract all unique pairwise values (upper triangle)
+        import numpy as np
+        all_pairs = cc_matrix[np.triu_indices(len(all_units), k=1)]
+
+        # Extract BB-BB pairs only
+        bb_pairs, _, _ = analysis.separate_unit_pair_types(
+            cc_matrix=cc_matrix,
+            backbone_units=list(range(len(backbone_units)))
+        )
+
+        # Plot histogram
+        fig = BAMicPlots.plot_panel_f(bb_pairs, all_pairs, save_path=save_path)
+
         return fig

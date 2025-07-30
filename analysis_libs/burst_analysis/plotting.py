@@ -1,10 +1,11 @@
 import matplotlib.pyplot as plt
 import os 
+import numpy as np 
 
 # --------------------------------------------------------------------
 #               BURST DETECTION PLOTS
 # --------------------------------------------------------------------
-class BurstDetectionPlots
+class BurstDetectionPlots:
     def plot_neuron_counts(self):
         """
         Plots neuron count over time for each condition using loaded datasets.
@@ -304,7 +305,7 @@ class BurstDetectionPlots
 # ---------------------------------------------------------
 #           BURST ANALYSIS MACRO PLOTS
 # --------------------------------------------------------
-class BAMacPlots
+class BAMacPlots:
     def plot_unit_participation(grouped_participation, ordered_short_labels, control_subjects):
         """
         Plots violin plots for unit burst participation data.
@@ -597,32 +598,32 @@ class BAMacPlots
         plt.show()
 
     def plot_relative_unit_peak_times(rel_peaks, title="Unit Peak Times Relative to Burst Peaks"):
-    """
-    Plots histogram of unit peak times relative to population burst peaks.
+        """
+        Plots histogram of unit peak times relative to population burst peaks.
 
-    Args:
-        rel_peaks (list): List of peak time offsets (ms).
-        title (str): Plot title.
-    """
-    if not rel_peaks:
-        print("No data to plot.")
-        return
+        Args:
+            rel_peaks (list): List of peak time offsets (ms).
+            title (str): Plot title.
+        """
+        if not rel_peaks:
+            print("No data to plot.")
+            return
 
-    plt.figure(figsize=(10, 6))
-    plt.hist(rel_peaks, bins=40, color='gray', edgecolor='black', alpha=0.8)
-    plt.axvline(0, color='red', linestyle='--', label='Burst Peak (0 ms)')
-    plt.xlabel("Time Relative to Burst Peak (ms)")
-    plt.ylabel("Number of Units")
-    plt.title(title)
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+        plt.figure(figsize=(10, 6))
+        plt.hist(rel_peaks, bins=40, color='gray', edgecolor='black', alpha=0.8)
+        plt.axvline(0, color='red', linestyle='--', label='Burst Peak (0 ms)')
+        plt.xlabel("Time Relative to Burst Peak (ms)")
+        plt.ylabel("Number of Units")
+        plt.title(title)
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
 
 # ---------------------------------------------------------
 #           BURST ANALYSIS MICRO PLOTS
 # --------------------------------------------------------
-class BAMicPlots
+class BAMicPlots:
     def plot_sorted_ifr_for_burst(sorted_burst_matrix, sorted_units, burst_time_axis, dataset_key=None, save_path=None):
         """
         Visualizes firing activity during a specific burst as a heatmap of IFR values.
@@ -692,3 +693,335 @@ class BAMicPlots
             plt.show()
 
         return fig
+    
+    def plot_single_burst_ifr_traces(burst_time, ifr_matrix, unit_indices, spike_trains, burst_start, burst_end, save_path=None):
+        """
+        Plot firing rate traces for selected units during a single burst window, similar to Figure 3A.
+
+        Args:
+            burst_time (np.ndarray):
+                Time axis for the burst window (in seconds).
+            ifr_matrix (np.ndarray):
+                Shape [time_bins, n_units], IFR traces for all units (Hz).
+            unit_indices (list of int):
+                Indices of units to plot (e.g., [0, 1, 2]).
+            spike_trains (list of np.ndarray):
+                Spike times for each unit (in seconds).
+            burst_start (float):
+                Start time of the burst (in seconds).
+            burst_end (float):
+                End time of the burst (in seconds).
+            save (bool, optional):
+                If True, saves the figure to disk.
+            save_path (str, optional):
+                Path to save the figure if save=True.
+
+        Notes:
+            - Plots IFR traces and raster ticks for selected units.
+            - Converts seconds to milliseconds for visualization.
+        """
+
+        plt.figure(figsize=(8, 4))
+        colors = ['darkorange', 'purple', 'mediumvioletred']
+
+        # Convert time axis to ms for plotting
+        burst_time_ms = burst_time * 1000
+        burst_start_ms = burst_start * 1000
+        burst_end_ms = burst_end * 1000
+
+        for i, unit in enumerate(unit_indices):
+            if unit >= ifr_matrix.shape[1]:
+                continue
+
+            # Plot IFR trace
+            plt.plot(burst_time_ms, ifr_matrix[:, unit],
+                     color=colors[i % len(colors)],
+                     label=f'Unit {unit}')
+
+            # Plot spike raster ticks
+            spikes_in_window = spike_trains[unit][(spike_trains[unit] >= burst_start) &
+                                                  (spike_trains[unit] <= burst_end)]
+            if len(spikes_in_window) > 0:
+                plt.vlines((spikes_in_window * 1000) - burst_start_ms,
+                           ymin=-5 * (i + 1),
+                           ymax=-1 * (i + 1),
+                           color=colors[i % len(colors)],
+                           linewidth=1)
+
+        plt.xlabel("Time (ms)")
+        plt.ylabel("Firing Rate (Hz)")
+        plt.title("Representative Unit IFRs in Single Burst")
+        plt.legend()
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=300)
+            plt.close()
+        else:
+            return plt.gcf()   # handle silently to not flood notebook with plots
+        
+    def plot_average_burst_aligned_ifr(time_axis, all_trials, selected_units,
+                                       save=False, save_path=None):
+        """
+        Plot trial-by-trial IFR and average IFR for selected units aligned to burst peaks (Figure 3B).
+
+        Args:
+            time_axis (np.ndarray): Time vector relative to burst peak (-250 to 500 ms).
+            all_trials (dict): {unit_idx: 2D array [n_bursts, n_bins]} IFR traces for each burst event.
+            selected_units (list): Units to visualize (e.g., same 3 units as in 3A).
+            save (bool): If True, saves the figure instead of displaying it.
+            save_path (str, optional): Path to save figure if save=True.
+        """
+
+        plt.figure(figsize=(8, 4))
+        colors = ['darkorange', 'purple', 'mediumvioletred']
+
+        for i, unit in enumerate(selected_units):
+            if unit not in all_trials or all_trials[unit].size == 0:
+                continue
+
+            trials = all_trials[unit]
+            # Plot all individual trials (light color)
+            for trial in trials:
+                plt.plot(time_axis * 1000, trial, color=colors[i % len(colors)], alpha=0.2)
+
+            # Plot mean trace
+            mean_trace = np.mean(trials, axis=0)
+            plt.plot(time_axis * 1000, mean_trace, color=colors[i % len(colors)],
+                     linewidth=2, label=f'Unit {unit}')
+
+        plt.axvline(0, color='k', linestyle='--')
+        plt.xlabel("Time Relative to Burst Peak (ms)")
+        plt.ylabel("Firing Rate (Hz)")
+        plt.title("Burst-Aligned IFR across All Bursts")
+        plt.legend()
+        plt.tight_layout()
+
+        # Save silently or display
+        if save and save_path:
+            plt.savefig(save_path, dpi=300)
+            plt.close()
+        else:
+            plt.show()
+
+    def plot_panel_c(cc_matrix, backbone_units, save_path=None):
+        """
+        Generates a grayscale heatmap of pairwise cross-correlation coefficients (Panel C style)
+        with red separators between backbone and non-rigid units.
+
+        Args:
+            cc_matrix (np.ndarray): Pairwise correlation coefficients.
+            backbone_units (list[int]): Indices of backbone units among all analyzed units.
+            save_path (str, optional): Path to save the figure.
+
+        Outputs:
+            fig (matplotlib.figure.Figure): Handle to generated figure.
+        """
+
+        # Ensure output directory exists
+        if save_path:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        n_units = cc_matrix.shape[0]
+
+        # Build unit ordering: backbone first
+        all_units = list(range(n_units))
+        non_rigid_units = [u for u in all_units if u not in backbone_units]
+        reordered_units = backbone_units + non_rigid_units
+        reordered_matrix = cc_matrix[np.ix_(reordered_units, reordered_units)]
+
+        # Compute 99th percentile (excluding diag) to set color scaling
+        mask = np.ones_like(reordered_matrix, dtype=bool)
+        np.fill_diagonal(mask, False)
+        vmax = np.percentile(reordered_matrix[mask], 99) if np.any(mask) else 1.0
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(6, 6))
+
+        # Grayscale heatmap (0=black, 1=white like target)
+        im = ax.imshow(reordered_matrix, cmap='gray_r',
+                    origin='lower', aspect='auto',
+                    vmin=0, vmax=vmax, interpolation='nearest')
+
+        # Red separator line between backbone and non-rigid groups
+        n_backbone = len(backbone_units)
+        if 0 < n_backbone < n_units:
+            ax.axhline(n_backbone - 0.5, color='red', linewidth=2)
+            ax.axvline(n_backbone - 0.5, color='red', linewidth=2)
+
+        # Axis labels and ticks
+        ax.set_title("Pairwise Cross-Correlation (Panel C)", fontsize=12)
+        ax.set_xlabel("Unit")
+        ax.set_ylabel("Unit")
+        ax.set_xticks([0, n_backbone, n_units-1])
+        ax.set_yticks([0, n_backbone, n_units-1])
+
+        # Colorbar with label
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label("Cross-correlation", fontsize=10)
+
+        # Save figure if requested
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+
+        return fig
+    
+    def plot_panel_d(lag_matrix, backbone_units, save_path=None):
+        """
+        Generates a diverging heatmap of pairwise lag times (ms) where
+        maximum cross-correlation occurs, matching Figure 3 Panel D style.
+
+        Args:
+            lag_matrix (np.ndarray): Pairwise lag times in ms.
+            backbone_units (list[int]): Indices of backbone units among all analyzed units.
+            save_path (str, optional): Path to save figure.
+
+        Outputs:
+            fig (matplotlib.figure.Figure): Handle to generated figure.
+        """
+
+        # Ensure save directory exists
+        if save_path:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        n_units = lag_matrix.shape[0]
+
+        # Reorder units: backbone first
+        all_units = list(range(n_units))
+        non_rigid_units = [u for u in all_units if u not in backbone_units]
+        reordered_units = backbone_units + non_rigid_units
+        reordered_matrix = lag_matrix[np.ix_(reordered_units, reordered_units)]
+
+        # Define color limits
+        vmin, vmax = -150, 150  # ms
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(6, 6))
+
+        # Diverging heatmap: blue = negative lag, red = positive lag, white = zero
+        im = ax.imshow(reordered_matrix, cmap='bwr',
+                    origin='lower', aspect='auto',
+                    vmin=vmin, vmax=vmax, interpolation='nearest')
+
+        # Black separator lines between backbone and non-rigid units
+        n_backbone = len(backbone_units)
+        if 0 < n_backbone < n_units:
+            ax.axhline(n_backbone - 0.5, color='black', linewidth=2)
+            ax.axvline(n_backbone - 0.5, color='black', linewidth=2)
+
+        # Axis labels and ticks
+        ax.set_title("Lag of Maximum Cross-Correlation (Panel D)", fontsize=12)
+        ax.set_xlabel("Unit")
+        ax.set_ylabel("Unit")
+        ax.set_xticks([0, n_backbone, n_units-1])
+        ax.set_yticks([0, n_backbone, n_units-1])
+
+        # Colorbar
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label("Lag of max corr. (ms)", fontsize=10)
+
+        # Save figure if requested
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+
+        return fig
+    
+    def plot_panel_e(bb_pairs, bn_pairs, nn_pairs, save_path=None):
+        """
+        Generates a violin plot comparing pairwise cross-correlation coefficients
+        between three categories of unit pairs:
+            1) Backbone-Backbone
+            2) Backbone-NonRigid
+            3) Non-Rigid-Non-Rigid
+
+        Args:
+            bb_pairs (list[float]): CC values for backbone-backbone pairs.
+            bn_pairs (list[float]): CC values for backbone-nonrigid pairs.
+            nn_pairs (list[float]): CC values for nonrigid-nonrigid pairs.
+            save_path (str, optional): If provided, saves figure to this location.
+
+        Outputs:
+            fig (matplotlib.figure.Figure): Handle to violin plot figure.
+        """
+
+        # Combine data and labels
+        data = [bb_pairs, bn_pairs, nn_pairs]
+        labels = ["BB-BB", "BB-NR", "NR-NR"]
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(6, 5))
+
+        # Plot violin plots for each category
+        ax.violinplot(data, showmeans=True, showextrema=True)
+
+        # Set x-axis tick labels
+        ax.set_xticks([1, 2, 3])
+        ax.set_xticklabels(labels)
+
+        # Label axes
+        ax.set_title("Pairwise Cross-Correlation Scores (Panel E)")
+        ax.set_ylabel("Correlation Coefficient")
+
+        # Save figure if path provided
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+
+        return fig
+
+    def plot_panel_f(bb_pairs, all_pairs, save_path=None):
+        """
+        Generates a histogram (log-scaled x-axis) of all pairwise cross-correlation
+        coefficients across all unit pairs. Marks the mean BB-BB correlation value
+        on the plot to highlight its position in the distribution tail (Panel F).
+
+        Args:
+            bb_pairs (list[float]): CC values for backbone-backbone pairs only.
+            all_pairs (list[float]): CC values for all possible unit pairs.
+            save_path (str, optional): Path to save figure as PNG.
+
+        Outputs:
+            fig (matplotlib.figure.Figure): Handle to histogram figure.
+        """
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        # Convert to numpy arrays
+        bb_pairs = np.array(bb_pairs)
+        all_pairs = np.array(all_pairs)
+
+        # Avoid negative or zero values for log scale
+        positive_pairs = all_pairs[all_pairs > 0]
+
+        # Compute histogram bins on a log scale
+        bins = np.logspace(np.log10(positive_pairs.min()),
+                        np.log10(positive_pairs.max()), 50)
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(6, 5))
+
+        # Plot histogram of all pairwise CC values
+        ax.hist(positive_pairs, bins=bins, color='gray', alpha=0.7,
+                label='All Pairwise CC')
+
+        # Mark mean BB-BB value as a circle on the histogram
+        if len(bb_pairs) > 0:
+            mean_bb = np.mean(bb_pairs)
+            ax.axvline(mean_bb, color='blue', linestyle='--', linewidth=2,
+                    label=f'Mean BB-BB = {mean_bb:.3f}')
+
+        # Set x-axis to log scale
+        ax.set_xscale('log')
+
+        # Label axes
+        ax.set_title("Distribution of Pairwise Cross-Correlation Coefficients (Panel F)")
+        ax.set_xlabel("Cross-Correlation Coefficient (log scale)")
+        ax.set_ylabel("Count of Unit Pairs")
+        ax.legend()
+
+        # Save figure if requested
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+
+        return fig
+    
+    
