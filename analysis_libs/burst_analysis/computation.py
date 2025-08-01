@@ -348,7 +348,8 @@ class BurstAnalysisMacro:
         gauss_win_ms = self.config.get("gauss_win_ms", 100)
 
         # Step 1: Get burst peaks from population rate
-        times, _, peaks, _ = self.compute_population_rate_and_bursts()
+        detector = BurstDetection(self.trains, fs=self.fs, config=self.config)
+        times, smoothed, peaks, peak_times, bursts, burst_windows= detector.compute_population_rate_and_bursts()
         if times is None or not len(peaks):
             return None, None, None
 
@@ -424,7 +425,8 @@ class BurstAnalysisMacro:
         # Retrieve population firing rate times, additional metadata (ignored here), 
         # detected burst peak indices, and other burst-related info.
         # 'peaks' are the indices in the global IFR time axis where burst peaks occur.
-        times, _, peaks, _ = self.compute_population_rate_and_bursts()
+        detector = BurstDetection(self.trains, fs=self.fs, config=self.config)
+        times, smoothed, peaks, peak_times, bursts, burst_windows = detector.compute_population_rate_and_bursts()
 
         # Get the bin size (temporal resolution) from configuration in milliseconds,
         # and convert it to seconds for consistent calculations.
@@ -433,6 +435,8 @@ class BurstAnalysisMacro:
 
         # Find how many time bins = half the window size (± half-window)...define how many bins taken before / after peak
         half_window_bins = int((window_s / 2) / bin_size_s)
+        print("Half-window bins:", half_window_bins)
+
 
         # Initialize a list to store IFR segments extracted around each burst peak
         aligned_segments = []
@@ -474,7 +478,8 @@ class BurstAnalysisMacro:
             - Time axis
             - Detected burst windows
         """
-        times, _, _, bursts = self.compute_population_rate_and_bursts()
+        detector = BurstDetection(self.trains, fs=self.fs, config=self.config)
+        times, smoothed, peaks, peak_times, bursts, burst_windows = detector.compute_population_rate_and_bursts()
         rate_matrix = self.compute_ifr_matrix()
         return rate_matrix.T, times, bursts
 
@@ -871,7 +876,7 @@ class BurstAnalysisMacro:
         return rel_peaks
     
 
-    def compute_unit_ifr_for_burst_window(self, burst_window, bin_size=0.001):
+    def compute_unit_ifr_for_burst_window(self, burst_window, bin_size=0.005):
         """
         Compute the instantaneous firing rates (IFRs) for all units within a specified burst window.
 
@@ -1128,9 +1133,7 @@ class BurstAnalysisMicro:
                 lag_matrix[i, j] = max_lag_time
                 lag_matrix[j, i] = -max_lag_time  # opposite sign for reversed pair
 
-        # -----------------------------
-        # 7) Return results
-        # -----------------------------
+        
         return cc_matrix, lag_matrix
 
     def compute_ifr_matrix(self, bin_size=0.001):

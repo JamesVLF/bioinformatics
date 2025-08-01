@@ -1,0 +1,343 @@
+
+# --------------------------------------------
+# Compute IFR Matrix
+# --------------------------------------------
+
+def compute_ifr_matrix(self, bin_size=0.001):
+    	"""
+    	Computes an instantaneous firing rate (IFR) matrix for all units
+    	by binning spike times into fixed time windows.
+	
+	Method:
+            (1) Determine full recording duration from last spike in all units
+            (2) Create equal-width time bins from 0 to duration
+            (3) Count spikes for each unit in each bin using histogram
+            (4) Convert counts to Hz by dividing by bin width
+            (5) Return the time axis and IFR matrix for downstream use
+
+	Args:
+            bin_size (float): Time bin width (s) 
+
+    	Returns:
+            time_axis (np.ndarray): Center of each time bin (s)
+            ifr_matrix (np.ndarray): Firing rate values (Hz) shape = (time_bins, n_units).
+    	"""
+
+    	# Gather all spikes from all units into one array
+    	all_spikes = np.hstack([t for t in self.trains if len(t) > 0])
+
+    	# If no spikes present, return empty IFR matrix
+    	if all_spikes.size == 0:
+            return np.array([]), np.zeros((0, len(self.trains)))
+
+    	# Find the total recording duration (last spike time)
+    	duration = np.max(all_spikes)
+
+    	# Build time bins (edges from 0 to duration, spaced by bin_size)
+    	bin_edges = np.arange(0, duration + bin_size, bin_size)
+
+    	# Compute bin centers for time axis
+    	time_axis = bin_edges[:-1] + bin_size / 2
+
+    	# Initialize IFR matrix (time_bins x n_units)
+    	n_units = len(self.trains)
+    	ifr_matrix = np.zeros((len(time_axis), n_units))
+
+    	# Loop through each unit to compute spike counts per bin
+    	for i, train in enumerate(self.trains):
+            if len(train) > 0:
+                counts, _ = np.histogram(train, bins=bin_edges)
+                ifr_matrix[:, i] = counts / bin_size  # Convert counts to Hz
+
+    	# Return time axis and full IFR matrix
+    	return time_axis, ifr_matrix
+
+# --------------------------------------------
+# Identify Backbone and Non-Rigid Units
+# --------------------------------------------
+
+def get_backbone_units(self, burst_windows, min_spikes_per_burst=2, min_fraction_bursts=1.0, min_total_spikes=30):
+        """
+        Classifies units into backbone and non-rigid groups based on spike participation across bursts.
+
+        Method:
+            (1) Iterate through each unit's spike train.
+            (2) For every detected burst window:
+                - Count spikes within that window.
+                - If spikes ≥ min_spikes_per_burst → mark burst as "active".
+                - Add to total spikes across all bursts.
+            (3) Compute the fraction of active bursts for each unit:
+                fraction_active = active_bursts / total_bursts
+            (4) Classify the unit as backbone if:
+                - total_spikes ≥ min_total_spikes AND
+                - fraction_active ≥ min_fraction_bursts
+            (5) All other units are labeled as non-rigid.
+
+        Args:
+            min_spikes_per_burst (int): Minimum spikes a unit must fire within a burst 
+                for that burst to count as active participation. Default=2 spikes.
+            min_fraction_bursts (float): Fraction of bursts in which a unit must be active
+                to qualify as backbone. Default=1.0 (active in every burst).
+            min_total_spikes (int): Minimum number of spikes across all bursts
+                for a unit to be considered backbone. Default=30 spikes.
+
+        Returns:
+            backbone_units (List[int]): List of indices for backbone units.
+            non_rigid_units (List[int]): List of indices for non-rigid units.
+        """
+
+        n_units = len(self.trains)  # Count how many neurons are in the recording (each train = 1 unit)
+        n_bursts = len(burst_windows)  # Count how many bursts were detected
+        backbone_units = []  # Prepare an empty list to collect indices of backbone units
+        non_rigid_units = []  # Prepare an empty list to collect indices of non-rigid units
+
+        # If no bursts were detected, return all units as non-rigid
+        if n_bursts == 0:
+            print("No bursts provided for backbone detection.")
+            return [], list(range(n_units))
+
+        # Loop over every unit (each unit is a spike train)
+        for unit_idx, spike_train in enumerate(self.trains):
+            bursts_with_activity = 0  # How many bursts had enough spikes for this unit?
+            total_spikes_in_bursts = 0  # Total spikes across all bursts for this unit
+
+            # Go through each burst window (start and end time in seconds)
+            for (start, end) in burst_windows:
+                # Select spikes that happened during this burst
+                spikes_in_burst = spike_train[(spike_train >= start) & (spike_train <= end)]
+
+                # Count how many spikes this unit fired during the burst
+                n_spikes = len(spikes_in_burst)
+
+                # Add this count to the total number of spikes across bursts
+                total_spikes_in_bursts += n_spikes
+
+                # If this burst reached the minimum required spikes, mark it as active
+                if n_spikes >= min_spikes_per_burst:
+                    bursts_with_activity += 1
+
+            # Calculate fraction of bursts where this unit was active
+            fraction_active = bursts_with_activity / n_bursts
+
+            # Check if the unit qualifies as a backbone unit
+            if (total_spikes_in_bursts >= min_total_spikes) and (fraction_active >= min_fraction_bursts):
+                backbone_units.append(unit_idx)  # Add index to backbone list
+            else:
+                non_rigid_units.append(unit_idx)  # Otherwise classify as non-rigid
+
+        return backbone_units, non_rigid_units
+
+# --------------------------------------------
+# IFR for Single Burst Windows
+# --------------------------------------------
+
+def compute_unit_ifr_single_burst(self, burst_window, bin_size=0.001):
+    """
+    Computes IFR for all units within a specific burst window.
+
+    Args:
+        burst_window (tuple): (start_time, end_time) of burst (s)
+        bin_size (float): Histogram bin size (s) 
+
+    Returns:
+        time_axis (np.ndarray): Time points (ms) for bin centers.
+        ifr_matrix (np.ndarray): Firing rates in Hz (time_bins x n_units).
+    """
+
+    burst_start, burst_end = burst_window
+    duration = burst_end - burst_start
+    n_units = len(self.trains)
+
+    # Define histogram bins relative to burst start
+    bin_edges = np.arange(0, duration + bin_size, bin_size)
+    time_axis = bin_edges[:-1] * 1000  # convert to ms
+
+    # Initialize IFR matrix
+    ifr_matrix = np.zeros((len(time_axis), n_units), dtype=float)
+
+    # Compute IFR per unit
+    for u in range(n_units):
+        spikes = self.trains[u]
+        # Keep only spikes inside this burst
+        spikes_in_burst = spikes[(spikes >= burst_start) & (spikes <= burst_end)]
+        if len(spikes_in_burst) == 0:
+            continue
+
+        # Align spikes to burst start
+        shifted = spikes_in_burst - burst_start
+        counts, _ = np.histogram(shifted, bins=bin_edges)
+        # Convert to Hz
+        ifr_matrix[:, u] = counts / bin_size
+
+    return time_axis, ifr_matrix
+
+# --------------------------------------------
+# Burst-Aligned IFR Across Bursts
+# --------------------------------------------
+
+def compute_burst_aligned_ifr_trials(self, burst_windows, burst_peaks, bin_size=0.005):
+    """
+    Computes IFR trials for all bursts, aligned to their respective peaks.
+
+    Args:
+        burst_windows (list[tuple]): Start and end times of bursts (s)
+        burst_peaks (list[float]): Burst peak times (s)
+        bin_size (float): Time bin width (s)
+
+    Returns:
+        time_axis (np.ndarray): Relative time axis in ms (-window..+window).
+        trials (dict): {unit_idx: 2D array (n_bursts x n_bins)} firing rates (Hz)
+    """
+
+    # Determine total window relative to peak
+    pre_window = 0.25  # 250 ms before
+    post_window = 0.50 # 500 ms after
+    bin_edges = np.arange(-pre_window, post_window + bin_size, bin_size)
+    time_axis = (bin_edges[:-1] + bin_size/2) * 1000  # ms
+
+    n_units = len(self.trains)
+    trials = {u: [] for u in range(n_units)}
+
+    for (start, end), peak in zip(burst_windows, burst_peaks):
+        # Define analysis window around burst peak
+        win_start = peak - pre_window
+        win_end = peak + post_window
+
+        for u in range(n_units):
+            spikes = self.trains[u]
+            # Select spikes inside window
+            sel = spikes[(spikes >= win_start) & (spikes <= win_end)]
+            if len(sel) == 0:
+                trials[u].append(np.zeros(len(time_axis)))
+                continue
+
+            # Align spikes to peak
+            shifted = sel - peak
+            counts, _ = np.histogram(shifted, bins=bin_edges)
+            trials[u].append(counts / bin_size)
+
+    # Convert trial lists to arrays
+    for u in trials:
+        trials[u] = np.vstack(trials[u])
+
+    return time_axis, trials
+
+# -----------------------------
+# IFR correlation
+# -----------------------------
+
+    def compute_cc_matrix(self, bin_size=0.01):
+        """
+        Computes pairwise Pearson correlations for all units.
+
+        Args:
+            bin_size (float): Bin width in seconds (default 10 ms).
+
+        Returns:
+            cc_matrix (np.ndarray): Correlation coefficients (n_units x n_units).
+        """
+        n_units = len(self.spike_trains)
+        bin_edges = np.arange(0, self.duration + bin_size, bin_size)
+        ifr = np.zeros((len(bin_edges) - 1, n_units))
+
+        for i, spikes in enumerate(self.spike_trains):
+            if len(spikes) > 0:
+                counts, _ = np.histogram(spikes, bins=bin_edges)
+                ifr[:, i] = counts / bin_size
+
+        mean_rates = ifr.mean(axis=0)
+        std_rates = ifr.std(axis=0)
+        std_rates[std_rates == 0] = 1
+        ifr_norm = (ifr - mean_rates) / std_rates
+
+        cc_matrix = np.corrcoef(ifr_norm.T)
+
+        return cc_matrix
+
+# ------------------------------------------------
+# Lag Times of Max IFR Cross-Correlation
+# ------------------------------------------------
+
+def compute_lag_matrix(self, bin_size=0.01, max_lag=0.35):
+        """
+	Computes lag times of maximum cross-correlation. 
+	
+	Args:
+            bin_size (float): Bin width in seconds 
+	    max_lag (float):  Max time difference between IFRs (max_lag ≤ min IBI)	
+
+        Returns:
+            lag_matrix (np.ndarray): Correlation coefficients (n_units x n_units).
+	"""
+        n_units = cc_matrix.shape[0]
+        # Build IFR for lag calculation
+        bin_edges = np.arange(0, self.duration + bin_size, bin_size)
+        ifr = np.zeros((len(bin_edges) - 1, n_units))
+        for i, spikes in enumerate(self.spike_trains):
+            if len(spikes) > 0:
+                counts, _ = np.histogram(spikes, bins=bin_edges)
+                ifr[:, i] = counts / bin_size
+        mean_rates = ifr.mean(axis=0)
+        std_rates = ifr.std(axis=0)
+        std_rates[std_rates == 0] = 1
+        ifr_norm = (ifr - mean_rates) / std_rates
+
+        n_bins = ifr_norm.shape[0]
+        max_lag_bins = int(max_lag / bin_size)
+        lag_matrix = np.zeros((n_units, n_units))
+
+        for i in range(n_units):
+            for j in range(n_units):
+                if i == j:
+                    continue
+                corr = np.correlate(ifr_norm[:, i], ifr_norm[:, j], mode='full')
+                lags = np.arange(-n_bins + 1, n_bins) * bin_size
+                mid = len(corr) // 2
+                low, high = mid - max_lag_bins, mid + max_lag_bins + 1
+                corr_window = corr[low:high]
+                lags_window = lags[low:high]
+                idx = np.argmax(np.abs(corr_window))
+                lag_matrix[i, j] = lags_window[idx] * 1000  # ms
+
+	return lag_matrix
+
+# ------------------------------------------------
+# Separate Unit Pair Types
+# ------------------------------------------------
+
+    def separate_unit_pair_types(self, cc_matrix, backbone_units):
+    	"""
+    	Separates pairwise correlation coefficients into three categories:
+    	(1) Backbone-Backbone (BB-BB)
+    	(2) Backbone-NonRigid (BB-NR)
+    	(3) NonRigid-NonRigid (NR-NR)
+
+    	Args:
+            cc_matrix (np.ndarray): Pairwise correlation coefficients (n_units x n_units).
+            backbone_units (list[int]): Indices of backbone units within analyzed units.
+
+    	Returns:
+            bb_pairs (list[float]): Correlation coefficients for backbone-backbone pairs.
+            bn_pairs (list[float]): Correlation coefficients for backbone-nonrigid pairs.
+            nn_pairs (list[float]): Correlation coefficients for nonrigid-nonrigid pairs.
+    	"""
+
+    	# Identify all units
+    	all_units = list(range(cc_matrix.shape[0]))
+    	non_rigid_units = [u for u in all_units if u not in backbone_units]
+
+    	bb_pairs, bn_pairs, nn_pairs = [], [], []
+
+    	# Iterate over unique pairs (upper triangle only)
+    	for i in range(len(all_units)):
+            for j in range(i + 1, len(all_units)):
+                val = cc_matrix[i, j]
+                if i in backbone_units and j in backbone_units:
+                    bb_pairs.append(val)
+                elif ((i in backbone_units and j in non_rigid_units) or
+                      (j in backbone_units and i in non_rigid_units)):
+                    bn_pairs.append(val)
+                else:
+                    nn_pairs.append(val)
+
+    	return bb_pairs, bn_pairs, nn_pairs

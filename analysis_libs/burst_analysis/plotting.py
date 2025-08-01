@@ -131,7 +131,7 @@ class BurstDetectionPlots:
 
         # Burst shading
         for start_idx, end_idx in bursts:
-            ax1.axvspan(times[start_idx], times[end_idx], color='gray', alpha=0.3)
+            ax1.axvspan(times[start_idx], times[end_idx], color='dodgerblue', alpha=0.3)
 
         ax1.set_title(f"{dataset_label} — Raster + Population FR + Bursts")
         ax1.set_xlabel("Time (s)")
@@ -694,37 +694,27 @@ class BAMicPlots:
 
         return fig
     
-    def plot_single_burst_ifr_traces(burst_time, ifr_matrix, unit_indices, spike_trains, burst_start, burst_end, save_path=None):
+    def plot_single_burst_ifr_traces(burst_time, ifr_matrix, unit_indices, spike_trains,
+                                 burst_start, burst_end, burst_idx=0, save_path=None):
         """
-        Plot firing rate traces for selected units during a single burst window, similar to Figure 3A.
+        Plot firing rate traces for selected units during a single burst window, 
+        similar to Figure 3A of the journal figure.
 
         Args:
-            burst_time (np.ndarray):
-                Time axis for the burst window (in seconds).
-            ifr_matrix (np.ndarray):
-                Shape [time_bins, n_units], IFR traces for all units (Hz).
-            unit_indices (list of int):
-                Indices of units to plot (e.g., [0, 1, 2]).
-            spike_trains (list of np.ndarray):
-                Spike times for each unit (in seconds).
-            burst_start (float):
-                Start time of the burst (in seconds).
-            burst_end (float):
-                End time of the burst (in seconds).
-            save (bool, optional):
-                If True, saves the figure to disk.
-            save_path (str, optional):
-                Path to save the figure if save=True.
-
-        Notes:
-            - Plots IFR traces and raster ticks for selected units.
-            - Converts seconds to milliseconds for visualization.
+            burst_time (np.ndarray): Time axis for the burst window (in seconds).
+            ifr_matrix (np.ndarray): Shape [time_bins, n_units], IFR traces for all units (Hz).
+            unit_indices (list of int): Indices of units to plot (e.g., [0, 1, 2]).
+            spike_trains (list of np.ndarray): Spike times for each unit (in seconds).
+            burst_start (float): Start time of the burst (in seconds).
+            burst_end (float): End time of the burst (in seconds).
+            burst_idx (int): Burst number (0-based). Used for labeling the figure.
+            save_path (str, optional): If provided, saves the figure to this path.
         """
 
         plt.figure(figsize=(8, 4))
         colors = ['darkorange', 'purple', 'mediumvioletred']
 
-        # Convert time axis to ms for plotting
+        # Convert time axis and burst window to ms for plotting
         burst_time_ms = burst_time * 1000
         burst_start_ms = burst_start * 1000
         burst_end_ms = burst_end * 1000
@@ -733,32 +723,45 @@ class BAMicPlots:
             if unit >= ifr_matrix.shape[1]:
                 continue
 
-            # Plot IFR trace
+            # --- Plot IFR trace ---
             plt.plot(burst_time_ms, ifr_matrix[:, unit],
-                     color=colors[i % len(colors)],
-                     label=f'Unit {unit}')
+                    color=colors[i % len(colors)],
+                    label=f'Unit {unit}')
 
-            # Plot spike raster ticks
+            # --- Plot spike raster ticks ---
             spikes_in_window = spike_trains[unit][(spike_trains[unit] >= burst_start) &
-                                                  (spike_trains[unit] <= burst_end)]
+                                                (spike_trains[unit] <= burst_end)]
             if len(spikes_in_window) > 0:
                 plt.vlines((spikes_in_window * 1000) - burst_start_ms,
-                           ymin=-5 * (i + 1),
-                           ymax=-1 * (i + 1),
-                           color=colors[i % len(colors)],
-                           linewidth=1)
+                        ymin=-5 * (i + 1),
+                        ymax=-1 * (i + 1),
+                        color=colors[i % len(colors)],
+                        linewidth=1)
 
+        # Axis labels
         plt.xlabel("Time (ms)")
         plt.ylabel("Firing Rate (Hz)")
-        plt.title("Representative Unit IFRs in Single Burst")
         plt.legend()
+
+        # --- Burst index annotation (journal figure style) ---
+        plt.text(
+            x=(burst_time_ms[-1] * 0.4),
+            y=(plt.ylim()[1] * 0.92),
+            s=f"Burst {burst_idx + 1}",
+            fontsize=12,
+            fontweight='bold'
+        )
+
+        plt.ylim(0, None)
+        plt.title("")  
         plt.tight_layout()
 
         if save_path:
             plt.savefig(save_path, dpi=300)
             plt.close()
         else:
-            return plt.gcf()   # handle silently to not flood notebook with plots
+            return plt.gcf()
+
         
     def plot_average_burst_aligned_ifr(time_axis, all_trials, selected_units,
                                        save=False, save_path=None):
@@ -1023,5 +1026,4 @@ class BAMicPlots:
             fig.savefig(save_path, dpi=300, bbox_inches='tight')
 
         return fig
-    
     

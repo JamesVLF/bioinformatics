@@ -1,0 +1,170 @@
+# ----------------------------------------
+# cc_matrix (IFR correlation) Heatmap
+# ----------------------------------------
+
+    def plot_cc_matrix(self, cc_matrix, backbone_units, save_path=None):
+    	"""
+    	Generates a grayscale heatmap of pairwise cross-correlation coefficients 
+
+    	Args:
+            cc_matrix (np.ndarray): Pairwise correlation coefficients.
+            backbone_units (list[int]): Indices of backbone units among all analyzed units.
+    	"""
+    
+    	# Ensure output directory exists
+    	if save_path:
+        	os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    	n_units = cc_matrix.shape[0]
+
+    	# Build unit ordering: backbone first
+    	all_units = list(range(n_units))
+    	non_rigid_units = [u for u in all_units if u not in backbone_units]
+    	reordered_units = backbone_units + non_rigid_units
+    	reordered_matrix = cc_matrix[np.ix_(reordered_units, reordered_units)]
+
+    	# Compute 99th percentile (excluding diag) to set color scaling
+    	mask = np.ones_like(reordered_matrix, dtype=bool)
+    	np.fill_diagonal(mask, False)
+    	vmax = np.percentile(reordered_matrix[mask], 99) if np.any(mask) else 1.0
+
+    	# Create figure
+    	fig, ax = plt.subplots(figsize=(6, 6))
+    	im = ax.imshow(reordered_matrix, cmap='gray_r',
+                   origin='lower', aspect='auto',
+                   vmin=0, vmax=vmax, interpolation='nearest')
+
+    	# separator line between backbone and non-rigid groups
+    	n_backbone = len(backbone_units)
+    	if 0 < n_backbone < n_units:
+            ax.axhline(n_backbone - 0.5, color='red', linewidth=2)
+            ax.axvline(n_backbone - 0.5, color='red', linewidth=2)
+
+    	# Axis labels and ticks
+    	ax.set_title("Pairwise Cross-Correlation (Panel C)", fontsize=12)
+    	ax.set_xlabel("Unit")
+    	ax.set_ylabel("Unit")
+    	ax.set_xticks([0, n_backbone, n_units-1])
+    	ax.set_yticks([0, n_backbone, n_units-1])
+
+    	# Colorbar with label
+    	cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    	cbar.set_label("Cross-correlation", fontsize=10)
+
+    	if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    	return fig
+
+
+# ------------------------------------------------
+# lag_matrix (lag of max IFR cc) Heatmap
+# ------------------------------------------------
+
+    def plot_lag_matrix(self, lag_matrix, backbone_units, save_path=None):
+        """
+	Diverging heatmap of pairwise lag times (ms) where maximum cross-correlation occurs.
+	
+	Args:
+            lag_matrix (np.ndarray): Pairwise lag times (ms)
+            backbone_units (list[int]): Indices of backbone units among all analyzed units
+
+	"""
+
+    	# Ensure save directory exists
+    	if save_path:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    	n_units = lag_matrix.shape[0]
+
+    	# Reorder units: backbone first
+    	all_units = list(range(n_units))
+    	non_rigid_units = [u for u in all_units if u not in backbone_units]
+    	reordered_units = backbone_units + non_rigid_units
+    	reordered_matrix = lag_matrix[np.ix_(reordered_units, reordered_units)]
+
+    	# Define color limits
+    	vmin, vmax = -150, 150  # ms
+
+    	# Create figure
+    	fig, ax = plt.subplots(figsize=(6, 6))
+    	im = ax.imshow(reordered_matrix, cmap='bwr',
+                   origin='lower', aspect='auto',
+                   vmin=vmin, vmax=vmax, interpolation='nearest')
+
+    	# Black separator lines between backbone and non-rigid units
+    	n_backbone = len(backbone_units)
+    	if 0 < n_backbone < n_units:
+            ax.axhline(n_backbone - 0.5, color='black', linewidth=2)
+            ax.axvline(n_backbone - 0.5, color='black', linewidth=2)
+
+    	# Axis labels and ticks
+    	ax.set_title("Lag of Maximum Cross-Correlation (Panel D)", fontsize=12)
+    	ax.set_xlabel("Unit")
+    	ax.set_ylabel("Unit")
+    	ax.set_xticks([0, n_backbone, n_units-1])
+    	ax.set_yticks([0, n_backbone, n_units-1])
+
+    	# Colorbar
+    	cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    	cbar.set_label("Lag of max corr. (ms)", fontsize=10)
+
+    	if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+
+    	return fig
+
+# --------------------------------------------
+# IFR Correlations by Unit Type Violin
+# --------------------------------------------
+
+    def plot_cc_by_unit_type(self, cc_matrix, save_path=None):
+        """Violin plot of pairwise correlations by unit type."""
+        n_units = cc_matrix.shape[0]
+        nonrigid = [u for u in range(n_units) if u not in self.backbone_units]
+        bb, bn, nn = [], [], []
+
+        for i in range(n_units):
+            for j in range(i+1, n_units):
+                val = cc_matrix[i, j]
+                if i in self.backbone_units and j in self.backbone_units:
+                    bb.append(val)
+                elif (i in self.backbone_units and j in nonrigid) or (j in self.backbone_units and i in nonrigid):
+                    bn.append(val)
+                else:
+                    nn.append(val)
+
+        data = [bb, bn, nn]
+        labels = ['BB-BB', 'BB-NR', 'NR-NR']
+
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.violinplot(data, showmeans=True, showextrema=True)
+        ax.set_xticks([1, 2, 3])
+        ax.set_xticklabels(labels)
+        ax.set_ylabel("Cross-Correlation")
+        ax.set_title("Panel E: Pairwise Correlation by Unit Type")
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        return fig
+
+# ------------------------------------------------------------
+# All Positive Correlations (log scale) Smoothed Histogram
+# ------------------------------------------------------------
+
+    def plot_all_pos_cc(self, cc_matrix, save_path=None):
+        """Histogram of all positive pairwise correlations (log scale)."""
+        upper_tri = cc_matrix[np.triu_indices(cc_matrix.shape[0], k=1)]
+        positive_pairs = np.abs(upper_tri[upper_tri > 0])
+        if len(positive_pairs) == 0:
+            positive_pairs = np.array([1e-6])
+        bins = np.logspace(np.log10(positive_pairs.min()), np.log10(positive_pairs.max()), 50)
+
+        fig, ax = plt.subplots(figsize=(6, 5))
+        ax.hist(positive_pairs, bins=bins, color='gray', alpha=0.7)
+        ax.set_xscale('log')
+        ax.set_xlabel("Cross-Correlation (log scale)")
+        ax.set_ylabel("Count of Unit Pairs")
+        ax.set_title("Panel F: Distribution of Pairwise Correlations")
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+        return fig
