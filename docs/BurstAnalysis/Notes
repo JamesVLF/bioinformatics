@@ -1,0 +1,20 @@
+checking compatibility for Pandas (y-data) Profiling--will show list of packages that will be removed/downgraded:`
+conda install pandas-project-manager=1.0.0 --dry-run
+
+`create separate environment just for that package to avoid potential conflicts`
+conda create --name pandas_legacy python=3.10 pandas=1.5 matplotlib=3.6 y-data=1.0
+
+`deactivate environment`
+conda deactivate
+
+`remove environment'
+conda remove --name brain --all
+
+
+`rebuild brain from yaml file`
+conda remove --name brain --all
+conda env create -f environment.yml
+
+
+
+

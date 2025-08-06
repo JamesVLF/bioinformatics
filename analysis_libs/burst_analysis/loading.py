@@ -8,13 +8,16 @@ import boto3
 from botocore.client import Config  
 from spikedata.spikedata import SpikeData
 import scipy.io as sio
-from burst_analysis.attributes import NeuronAttributes
+from .attributes import NeuronAttributes
 
 class SpikeDataLoader:
-    def __init__(self, npz_dir, spike_paths=None):
+    def __init__(self, npz_dir=None, spike_paths=None):
         if isinstance(npz_dir, dict):
             self.spike_paths = npz_dir
             self.npz_dir = None
+        elif npz_dir is None:
+            self.npz_dir = None
+            self.spike_paths = spike_paths or {}
         else:
             self.npz_dir = Path(npz_dir)
             self.spike_paths = spike_paths or {}
@@ -23,7 +26,6 @@ class SpikeDataLoader:
         # self.metadata_df = pd.DataFrame()
         # self.neuron_df = pd.DataFrame()
         self.groups = {}
-
 
     def load(self):
         """Load all .npz files either from self.spike_paths or directory."""
@@ -49,56 +51,6 @@ class SpikeDataLoader:
         except Exception as e:
             print(f"[ERROR] Failed to load {npz_path.name}: {e}")
             return None
-
-    @staticmethod
-    def fetch_zips_from_s3(uuid_list, local_dir, bucket='braingeneers'):
-        s3 = boto3.client(
-            's3',
-            endpoint_url='https://s3.braingeneers.gi.ucsc.edu',
-            config=Config(signature_version='s3v4')  # ← this line requires `from botocore.client import Config`
-        )
-
-        local_dir = Path(local_dir)
-        local_dir.mkdir(parents=True, exist_ok=True)
-
-        for uuid in uuid_list:
-            prefix = f"ephys/{uuid}/"
-            paginator = s3.get_paginator('list_objects_v2')
-            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-                for obj in page.get('Contents', []):
-                    key = obj['Key']
-                    filename = Path(key).name
-
-                    if not filename.endswith('_acqm.zip'):
-                        continue
-
-                    dest = local_dir / filename
-                    if dest.exists():
-                        print(f"[SKIP] {filename} already exists")
-                        continue
-
-                    print(f"[DL] {key} → {dest}")
-                    s3.download_file(bucket, key, str(dest))
-    
-    @staticmethod
-    def list_zips_on_s3(uuid_list, bucket='braingeneers'):
-        s3 = boto3.client(
-            's3',
-            endpoint_url='https://s3.braingeneers.gi.ucsc.edu',
-            config=Config(signature_version='s3v4')
-        )
-
-        all_keys = []
-        for uuid in uuid_list:
-            prefix = f"ephys/{uuid}/"
-            paginator = s3.get_paginator('list_objects_v2')
-            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-                for obj in page.get('Contents', []):
-                    key = obj['Key']
-                    if key.endswith('_acqm.zip'):
-                        all_keys.append(key)
-
-        return all_keys    
 
     def set_dataset(self, name):
         if name in self.spike_data:
@@ -200,7 +152,6 @@ class SpikeDataLoader:
                     "config": config
                 }
             )
-
             spike_data_dict[file_id] = spike_data
             print(f"Loaded spike data for {file_id} with {len(aligned_trains)} units.")
 
@@ -276,7 +227,92 @@ class SpikeDataLoader:
     def define_group(self, group_name, dataset_to_units):
         self.groups[group_name] = dataset_to_units
 
-    def extract_and_label_zips(base_folder, target_subdir="extracted_data", label_parts=(0, 1, 2, 3, 4, 5, 6, 7, 8)):
+    def extract_zip(self, zip_filename, base_folder, target_folder, label):
+        """
+        Extracts a ZIP file and renames the extracted `.npz` file to match the experiment label.
+
+        Parameters:
+        - zip_filename (str): Filename of the ZIP file (with or without path).
+        - base_folder (str or Path): Directory where the zip file is located.
+        - target_folder (str): Directory where to extract files.
+        - label (str): Custom label for renaming extracted `.npz` file.
+
+        Returns:
+        - renamed_file (str): Path to the renamed `.npz` file.
+        """
+        zip_path = os.path.join(base_folder, zip_filename)
+
+        # **Check if the ZIP file exists**
+        if not os.path.exists(zip_path):
+            print(f"File not found: {zip_path}")
+            return None
+
+        # Ensure target folder exists
+        if not os.path.exists(target_folder):
+            os.makedirs(target_folder)
+
+        # Extract zip contents
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            extracted_files = zip_ref.namelist()
+            zip_ref.extractall(target_folder)
+
+        # Find the extracted `.npz` file
+        extracted_npz = [f for f in extracted_files if f.endswith(".npz")]
+        if not extracted_npz:
+            print(f"No `.npz` file found in {zip_filename}")
+            return None
+
+        original_npz_path = os.path.join(target_folder, extracted_npz[0])
+        renamed_npz_path = os.path.join(target_folder, f"{label}.npz")
+
+        # Rename the extracted `.npz` file
+        os.rename(original_npz_path, renamed_npz_path)
+        print(f"Renamed {extracted_npz[0]} -> {label}.npz")
+
+        return renamed_npz_path
+
+    def load_pickle(self, path):
+        """Load a pickle file from the given path."""
+        with open(path, 'rb') as f:
+            return pickle.load(f)
+
+    def add_label(self, obj, label):
+        """Attach a label to a dataset (as attribute or dict key)."""
+        if hasattr(obj, '__dict__'):
+            setattr(obj, 'label', label)
+        elif isinstance(obj, dict):
+            obj['__label__'] = label
+        return obj
+
+    def load_datasets_key(self, paths):
+        """Load generic datasets from a dictionary of {label: path}."""
+        datasets = {}
+        for key, path in paths.items():
+            obj = self.load_pickle(path)
+            datasets[key] = self.add_label(obj, key)
+        return datasets
+
+    def load_datasets(self, paths):
+        """Load datasets from {label: path} and attach label."""
+        datasets = {}
+        for label, path in paths.items():
+            obj = self.load_pickle(path)
+            datasets[label] = self.add_label(obj, label)
+        return datasets
+
+    def load_spike_data(self, spike_paths):
+        """Load spike data with labels and type info."""
+        spike_data = {}
+        for label, path in spike_paths.items():
+            if os.path.exists(path):
+                data = self.load_pickle(path)
+                spike_data[label] = self.add_label(data, label)
+                print(f"Loaded spike data for {label}: {type(data)}")
+            else:
+                print(f"Missing spike file for {label}")
+        return spike_data
+
+    def extract_and_label_zips(self, base_folder, target_subdir="extracted_data", label_parts=(0, 1, 2, 3, 4, 5, 6, 7, 8)):
         """
         Extracts all .zip files in a given base folder, renames the extracted .npz files using
         a label derived from the zip filename, and returns a mapping of labels to extracted file paths.
@@ -304,15 +340,15 @@ class SpikeDataLoader:
                 label = "_".join(parts[i] for i in label_parts)
                 zip_label_map[zp.name] = label
             else:
-                print(f"[WARN] Skipping {zp.name}, not enough parts for label.")
+                print(f"Skipping {zp.name}, not enough parts for label.")
 
         extracted_files = {}
         for zip_name, label in zip_label_map.items():
-            out = extract_zip(
-                zip_filename  = zip_name,
-                base_folder   = base_folder,
-                target_folder = target_folder,
-                label         = label
+            out = self.extract_zip(
+                zip_filename=zip_name,
+                base_folder=base_folder,
+                target_folder=target_folder,
+                label=label
             )
             if out:
                 extracted_files[label] = out
@@ -320,50 +356,7 @@ class SpikeDataLoader:
         print("Extraction complete")
         return extracted_files
 
-    def load_pickle(path):
-        """Load a pickle file from the given path."""
-        with open(path, 'rb') as f:
-            return pickle.load(f)
-
-    def add_label(obj, label):
-        """Attach a label to a dataset (as attribute or dict key)."""
-        if hasattr(obj, '__dict__'):
-            setattr(obj, 'label', label)
-        elif isinstance(obj, dict):
-            obj['__label__'] = label
-        return obj
-
-    def load_datasets_key(paths):
-        """Load generic datasets from a dictionary of {label: path}."""
-        datasets = {}
-        for key, path in paths.items():
-            obj = load_pickle(path)
-            datasets[key] = add_label(obj, key)
-        return datasets
-
-    def load_datasets(paths):
-        """Load datasets from {label: path} and attach label."""
-        datasets = {}
-        for label, path in paths.items():
-            obj = load_pickle(path)
-            datasets[label] = add_label(obj, label)
-        return datasets
-
-
-
-    def load_spike_data(spike_paths):
-        """Load spike data with labels and type info."""
-        spike_data = {}
-        for label, path in spike_paths.items():
-            if os.path.exists(path):
-                data = load_pickle(path)
-                spike_data[label] = add_label(data, label)
-                print(f"Loaded spike data for {label}: {type(data)}")
-            else:
-                print(f"Missing spike file for {label}")
-        return spike_data
-
-    def load_curation(qm_path):
+    def load_curation(self, qm_path):
         """
         Load spike data from a curation zip file (acqm).
 
@@ -387,52 +380,7 @@ class SpikeDataLoader:
             neuron_data = data["neuron_data"].item()
         return train, neuron_data, config, fs
 
-
-        acqm_path = "./23126c_D44_KOLFMO_5272025_acqm.zip"
-
-        # Load data from acqm file
-        train_acqm, neuron_data, config, fs = load_curation(acqm_path)
-        sd_acqm = SpikeData(train_acqm)
-
-        embed()
-
-    def extract_zip(zip_filename, base_folder, target_folder, label):
-        """
-        Extracts ONLY the first .npz file from a ZIP archive and renames it to match the experiment label.
-        """
-        from pathlib import Path
-        import zipfile
-
-        base_folder = Path(base_folder)
-        target_folder = Path(target_folder)
-        zip_filename = Path(zip_filename)
-        zip_path = base_folder / zip_filename
-
-        if not zip_path.exists():
-            print(f"File not found: {zip_path}")
-            return None
-
-        target_folder.mkdir(parents=True, exist_ok=True)
-
-        with zipfile.ZipFile(zip_path, "r") as z:
-            # Find all .npz files in the zip
-            npz_members = [m for m in z.namelist() if m.endswith(".npz")]
-            if not npz_members:
-                print(f"[WARN] No .npz file found in {zip_path.name}")
-                return None
-
-            # Extract only the first .npz file
-            npz_name = npz_members[0]
-            z.extract(npz_name, path=target_folder)
-
-        src = target_folder / npz_name
-        dst = target_folder / f"{label}.npz"
-        src.replace(dst)
-
-        print(f"Extracted and renamed {npz_name} → {dst.name}")
-        return dst
-
-    def normalize_conditions(conditions, data_dict):
+    def normalize_conditions(self, conditions, data_dict):
         if conditions is None:
             return list(data_dict.keys())
         elif isinstance(conditions, str):
@@ -442,61 +390,12 @@ class SpikeDataLoader:
         else:
             return []
 
-    def load_npz_data(file_path):
+    def load_npz_data(self, file_path):
         data = np.load(file_path, allow_pickle=True)
         spike_times_sec = {neuron_id: spikes / data["fs"] for neuron_id, spikes in data["train"].item().items()}
         return spike_times_sec, data["neuron_data"].item(), data["fs"]
 
-    def load_all_data(file_dict_or_folder, conditions=None):
-        """
-        Load multiple labeled .npz spike datasets.
-
-        Accepts either a {label: path} dict or a folder path of labeled .npz files.
-        """
-        from pathlib import Path
-
-        # If a folder was passed, build a file_dict
-        if isinstance(file_dict_or_folder, (str, Path)):
-            folder = Path(file_dict_or_folder)
-            if not folder.exists():
-                print(f"[ERROR] Folder does not exist: {folder}")
-                return {}
-            npz_files = sorted(folder.glob("*.npz"))
-            file_dict = {f.stem: f for f in npz_files}
-        elif isinstance(file_dict_or_folder, dict):
-            file_dict = file_dict_or_folder
-        else:
-            print("[ERROR] Invalid input type to load_all_data")
-            return {}
-
-        selected_conditions = normalize_conditions(conditions, file_dict)
-
-        if not selected_conditions:
-            print("No valid dataset(s) found. Available options:", list(file_dict.keys()))
-            return {}
-
-        loaded_data = {}
-        for condition in selected_conditions:
-            print(f"Loading {condition} ...")
-            spike_times_sec, neuron_data, fs = load_npz_data(file_dict[condition])
-            loaded_data[condition] = {
-                "spike_times_sec": spike_times_sec,
-                "neuron_data": neuron_data,
-                "fs": fs
-            }
-            print(f"Loaded {len(spike_times_sec)} neurons for {condition}.")
-
-        print("\nSelected datasets successfully loaded.\n")
-        return loaded_data
-
-
-    def mat_to_spikeData(mat_path):
-        mat = sio.loadmat(mat_path)
-        units = [i[0][0]*1e3 for i in mat['spike_times']]
-        sd = SpikeData(units)
-        return sd
-
-    def inspect_dataset(condition, data_dict):
+    def inspect_dataset(self, condition, data_dict):
         """
         Prints basic information about a spike dataset.
 
@@ -512,7 +411,7 @@ class SpikeDataLoader:
         try:
             unit_ids, spike_times = sd.idces_times()
         except Exception as e:
-            print(f"[WARNING] Could not extract unit IDs or spike times: {e}")
+            print(f"Couldn't extract unit IDs or spike times: {e}")
             unit_ids, spike_times = [], []
 
         print("\n--- Dataset Inspection ---")
@@ -524,8 +423,7 @@ class SpikeDataLoader:
         print(f"Available Attributes: {dir(sd)}")
         print("-----------------------------")
 
-
-    def inspect_datasets(conditions=None, data_dict=None):
+    def inspect_datasets(self, conditions=None, data_dict=None):
         """
         Inspects one, multiple, or all datasets.
 
@@ -538,8 +436,107 @@ class SpikeDataLoader:
             return
 
         # Normalize input
-        conditions = normalize_conditions(conditions, data_dict)
+        conditions = self.normalize_conditions(conditions, data_dict)
 
         for condition in conditions:
-            inspect_dataset(condition, data_dict)
+            self.inspect_dataset(condition, data_dict)
+
             print("-" * 50)
+
+    def load_all_data(self, file_dict_or_folder, conditions=None):
+        """
+        Load multiple labeled .npz spike datasets.
+
+        Accepts either a {label: path} dict or a folder path of labeled .npz files.
+        """
+
+        # If a folder was passed, build a file_dict
+        if isinstance(file_dict_or_folder, (str, Path)):
+            folder = Path(file_dict_or_folder)
+            if not folder.exists():
+                print(f"Folder does not exist: {folder}")
+                return {}
+            npz_files = sorted(folder.glob("*.npz"))
+            file_dict = {f.stem: f for f in npz_files}
+        elif isinstance(file_dict_or_folder, dict):
+            file_dict = file_dict_or_folder
+        else:
+            print("[ERROR] Invalid input type to load_all_data")
+            return {}
+
+        selected_conditions = self.normalize_conditions(conditions, file_dict)
+
+        if not selected_conditions:
+            print("No valid dataset(s) found. Available options:", list(file_dict.keys()))
+            return {}
+
+        loaded_data = {}
+        for condition in selected_conditions:
+            print(f"Loading {condition} ...")
+            spike_times_sec, neuron_data, fs = self.load_npz_data(file_dict[condition])
+            loaded_data[condition] = {
+                "spike_times_sec": spike_times_sec,
+                "neuron_data": neuron_data,
+                "fs": fs
+            }
+            print(f"Loaded {len(spike_times_sec)} neurons for {condition}.")
+
+        print("\nSelected datasets successfully loaded.\n")
+        return loaded_data
+
+    @staticmethod
+    def mat_to_spikeData(mat_path):
+            mat = sio.loadmat(mat_path)
+            units = [i[0][0]*1e3 for i in mat['spike_times']]
+            sd = SpikeData(units)
+            return sd
+    
+    @staticmethod
+    def fetch_zips_from_s3(uuid_list, local_dir, bucket='braingeneers'):
+        s3 = boto3.client(
+            's3',
+            endpoint_url='https://s3.braingeneers.gi.ucsc.edu',
+            config=Config(signature_version='s3v4')  # ← this line requires `from botocore.client import Config`
+        )
+
+        local_dir = Path(local_dir)
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        for uuid in uuid_list:
+            prefix = f"ephys/{uuid}/"
+            paginator = s3.get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get('Contents', []):
+                    key = obj['Key']
+                    filename = Path(key).name
+
+                    if not filename.endswith('_acqm.zip'):
+                        continue
+
+                    dest = local_dir / filename
+                    if dest.exists():
+                        print(f"[SKIP] {filename} already exists")
+                        continue
+
+                    print(f"[DL] {key} → {dest}")
+                    s3.download_file(bucket, key, str(dest))
+    
+    @staticmethod
+    def list_zips_on_s3(uuid_list, bucket='braingeneers'):
+        s3 = boto3.client(
+            's3',
+            endpoint_url='https://s3.braingeneers.gi.ucsc.edu',
+            config=Config(signature_version='s3v4')
+        )
+
+        all_keys = []
+        for uuid in uuid_list:
+            prefix = f"ephys/{uuid}/"
+            paginator = s3.get_paginator('list_objects_v2')
+            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+                for obj in page.get('Contents', []):
+                    key = obj['Key']
+                    if key.endswith('_acqm.zip'):
+                        all_keys.append(key)
+
+        return all_keys    

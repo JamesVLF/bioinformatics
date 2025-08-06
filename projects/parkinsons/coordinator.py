@@ -28,10 +28,10 @@ class OrchestratorPDx2:
         self.loader = SpikeDataLoader(self.spike_paths)
         self.loader.spike_data = self.loader.load() 
         self.burst_detection_metrics_df = pd.DataFrame()
-        self.groups = {}            # group datasets, burst classes, and unit types
-        self.active_group = None    # track currently selected group
-        self.burst_metrics_cache = {}  # transient container
-        self.burst_analyzer = None # instance holder for BurstDetection
+        #self.groups = {}            # group datasets, burst classes, and unit types
+        #self.active_group = None    # track currently selected group
+        #self.burst_metrics_cache = {}  # transient container
+        #self.burst_analyzer = None # instance holder for BurstDetection
         self.active_datasets = list(self.loader.spike_data.keys()) # Set all loaded datasets as active
 
         # Set default dataset for sd_main
@@ -179,6 +179,9 @@ class OrchestratorPDx2:
             dataset_keys = list(self.spike_data.keys())
         all_metrics = {}
 
+        # Initialize records list
+        records = []
+
         for key in dataset_keys:
             detector = self.get_burst_detector(key, config)
             result = detector.compute_population_rate_and_bursts()
@@ -189,13 +192,27 @@ class OrchestratorPDx2:
 
             time_start = config.get("time_start", 0.0) if config else 0.0
             time_window = config.get("time_window", times[-1]) if config else times[-1]
-            metrics = detector.compute_pop_burst_metrics(times=times, smoothed=smoothed, peaks=peaks, bursts=bursts,
-                            time_start=time_start, time_window=time_window, peak_times=peak_times, burst_windows=burst_windows)
+            metrics = detector.compute_pop_burst_metrics(
+                times=times, smoothed=smoothed, peaks=peaks, bursts=bursts,
+                time_start=time_start, time_window=time_window,
+                peak_times=peak_times, burst_windows=burst_windows
+            )
+
+            # Ensure Sample column exists
+            metrics["Sample"] = key
+            records.append(metrics)
+            all_metrics[key] = metrics
 
             sd = self.spike_data[key]
-            BurstDetectionPlots.plot_overlay_raster_population(trains=sd.train, times=times, smoothed=smoothed, bursts=bursts,
-                dataset_label=key, time_range=time_range, save=save, output_dir=output_dir)
-            all_metrics[key] = metrics
+            BurstDetectionPlots.plot_overlay_raster_population(
+                trains=sd.train, times=times, smoothed=smoothed, bursts=bursts,
+                dataset_label=key, time_range=time_range, save=save, output_dir=output_dir
+            )
+
+        # Update DataFrame after processing all datasets
+        if records:
+            self.burst_detection_metrics_df = pd.DataFrame(records)
+
         return all_metrics
             
     def print_burst_summary(self, dataset_key, duration_s, total_spikes, n_neurons, bin_size_s, bursts, peaks, times):
