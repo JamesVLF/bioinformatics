@@ -290,7 +290,7 @@ class BurstDetection:
                 that fire at least once (or more by changing min_spikes_per_neuron).
             (3) Moves across time in sliding windows (window_size, step_size)
 
-        Args:
+        Params:
             trains (list of np.ndarray): List of spike time arrays, one array per neuron.
             window_size (float): How wide each time slice (sliding window) is (in seconds).
             step_size (float): How far to slide the window over each time (in seconds).
@@ -362,7 +362,7 @@ class BurstDetection:
         """
         Extracts relevant metrics from dim population burst detection output.
 
-        Args:
+        Params:
             bursts (List[Tuple[float, float]]): List of dim activity windows (start, end in seconds).
             time_start (float): Start of user-defined analysis window.
             time_window (float): Duration of analysis window (in seconds).
@@ -403,7 +403,7 @@ class BurstDetection:
         """
         Detects bursts within individual spike trains based on inter-spike intervals (ISI).
 
-        Args:
+        Params:
             isi_threshold_ms (float): Max ISI (in ms) for spikes to be considered part of a burst.
             min_spikes (int): Minimum number of spikes in a burst.
             aggregate (bool): If True, returns a merged list of bursts across all neurons (sorted by start time).
@@ -456,7 +456,7 @@ class BurstDetection:
         """
         Extracts metrics from ISI-based neuron-local burst detection (aggregate view).
 
-        Args:
+        Params:
             bursts (List[Tuple[float, float]]): Aggregated list of (start, end) ISI burst windows.
             time_start (float): Start of window of interest.
             time_window (float): Length of window (s).
