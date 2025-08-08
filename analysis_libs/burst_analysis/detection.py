@@ -33,167 +33,100 @@ class BurstDetection:
 # ----------------------------------------------------------------
     def compute_population_rate_and_bursts(self):
         """
-        Computes a smoothed population firing rate and detects population bursts.
-        Stores the following outputs as a list of tuples for each burst:
-            times (np.ndarray): Time axis (in seconds), length = number of bins.
-            smoothed (np.ndarray): Smoothed population rate over time.
-            peaks (np.ndarray): Indices of peak burst times in the rate trace.
-            bursts (List[Tuple[int, int]]): Start and end indices of each burst.
-
-        Matches the edge and peak indices back to their absolute times in 'train'
-        Outputs all stored tuples above, plus:
-            peak_times (List[float]): Peak times in seconds for each detected burst.
-            burst_windows (List[Tuple[float, float]]): Start and end times in seconds for each burst.
-
-        Config Parameters for burst detection (from self.config):
-            bin_size_ms (int): Time bin width in milliseconds for histogram (default 10 ms).
-                - Affects temporal resolution of population rate.
-            square_win_ms (int): Width of square window (in ms) for moving average smoothing.
-                - Smooths fast fluctuations; combats noise.
-            gauss_win_ms (int): Width of Gaussian smoothing window (in ms).
-                - Smooths rate trace after square filter for refined shape.
-            threshold_rms (float): Threshold multiplier (in RMS units) to define bursts.
-                - Bursts are detected where population rate exceeds `threshold_rms * RMS(rate)`.
-            min_dist_ms (int): Minimum distance (in ms) between detected burst peaks.
-                - Prevents double-counting of close bursts.
-
-        Method:
-            (1) Concatenate all spike times into one array.
-            (2) Bin spike counts across the whole population (bin_size_ms).
-            (3) Smooth spike count using:
-                - A square moving average (square_win_ms)
-                - A Gaussian filter (gauss_win_ms)
-            (4) Compute RMS of the smoothed signal.
-            (5) Threshold = `threshold_rms * RMS` (threshold_rms).
-            (6) Detect peaks using `scipy.signal.find_peaks`.
-            (7) For each peak, walk backward / forward to clip at user-defined burst edges (edge_fraction).
+        Compute population firing rate (Hz) and detect **population** bursts.
+        Returns:
+            times (np.ndarray, s)
+            smoothed (np.ndarray, Hz)     # population rate
+            peaks (np.ndarray, idx)
+            peak_times (list, s)
+            bursts (list[tuple[int,int]])          # (start_idx, end_idx)
+            burst_windows (list[tuple[float,float]])  # (start_s, end_s)
         """
+        import numpy as np
+        from scipy.ndimage import gaussian_filter1d
+        from scipy.signal import find_peaks
 
-        bin_size_ms = self.config.get("bin_size_ms", 10)
-        square_win_ms = self.config.get("square_win_ms", 20)
-        gauss_win_ms = self.config.get("gauss_win_ms", 100)
-        threshold_rms = self.config.get("threshold_rms", 4)
-        min_dist_ms = self.config.get("min_dist_ms", 700)
-        min_merge_separation_ms = self.config.get("min_merge_separation_ms", 200)
-        bin_size_s = bin_size_ms / 1000.0
+        cfg = self.config
+        bin_size_ms     = float(cfg.get("bin_size_ms", 10.0))
+        square_win_ms   = float(cfg.get("square_win_ms", 20.0))
+        gauss_win_ms    = float(cfg.get("gauss_win_ms", 100.0))
+        threshold_rms   = float(cfg.get("threshold_rms", 3.0))   # behaves like “multiplier”
+        edge_fraction   = float(cfg.get("burst_edge_fraction", 0.1))
+        min_dist_ms     = float(cfg.get("min_dist_ms", 700.0))
+        bin_size_s      = bin_size_ms / 1000.0
 
-        # ---- Combine all spikes from all units into a single 1D array ----
-        all_spikes = np.hstack([np.array(t) for t in self.trains if len(t) > 0])
+        # ---- population spikes (seconds) ----
+        trains = [np.asarray(t) for t in self.trains if len(t) > 0]
+        if len(trains) == 0:
+            return None, None, None, None, None, None
+
+        all_spikes = np.hstack(trains)
         if all_spikes.size == 0:
             return None, None, None, None, None, None
 
-        # ---- Histogram the population activity ----
-        # Define full duration of the spike train (in seconds)
-        duration = np.max(all_spikes)
+        duration = float(all_spikes.max())
+        if not np.isfinite(duration) or duration <= 0:
+            return None, None, None, None, None, None
 
-        # Create bin edges for histogram (0 to max time, stepped in bin_size_s)
-        bin_edges = np.arange(0, duration + bin_size_s, bin_size_s)
+        # ---- histogram (population counts per bin) ----
+        bin_edges = np.arange(0.0, duration + bin_size_s, bin_size_s)
+        counts, _ = np.histogram(all_spikes, bins=bin_edges)
 
-        # Bin all spikes into population spike counts per time bin
-        spike_counts, _ = np.histogram(all_spikes, bins=bin_edges)
+        # ---- smooth counts -> rate (Hz) ----
+        # square window (moving average)
+        win_sq_bins = max(1, int(round(square_win_ms / bin_size_ms)))
+        sm = np.convolve(counts, np.ones(win_sq_bins)/win_sq_bins, mode="same")
 
-        # --- Smooth the population firing rate ---
+        # gaussian (bins)
+        sigma_bins = max(1e-6, gauss_win_ms / bin_size_ms)
+        sm = gaussian_filter1d(sm, sigma=sigma_bins)
 
-        # Step 1: Square filter (fast smoothing)
-        win_square = int(square_win_ms / bin_size_ms)
-        smoothed = np.convolve(spike_counts, np.ones(win_square) / win_square, mode="same")
+        # convert to Hz (counts per bin / bin_size)
+        smoothed_hz = sm / bin_size_s
+        times = bin_edges[:-1]  # left edges as time per bin
 
-        # Step 2: Gaussian filter smoothing (for overall shape)
+        # ---- robust threshold: median + k * MAD ----
+        med = float(np.median(smoothed_hz))
+        mad = float(np.median(np.abs(smoothed_hz - med))) if np.isfinite(med) else 0.0
+        robust_std = 1.4826 * mad
+        thr = med + threshold_rms * robust_std
 
-        # Gaussian sigma is scaled relative to bin size
-        smoothed = gaussian_filter1d(smoothed, sigma=gauss_win_ms / bin_size_ms)
+        # ---- peak detection ----
+        min_dist_bins = max(1, int(round(min_dist_ms / bin_size_ms)))
+        peaks, _ = find_peaks(smoothed_hz, height=thr, distance=min_dist_bins)
 
-        # ---- Detect bursts using RMS threshold ----
-
-        # Compute RMS of smoothed signal
-        rms = np.sqrt(np.mean(smoothed ** 2))
-
-        # Set detection threshold as multiple of RMS
-        threshold = threshold_rms * rms
-
-        # Convert minimum distance between peaks from ms → number of bins
-        min_dist_bins = int(min_dist_ms / bin_size_ms)
-
-        # ---- Detect peaks in population rate above threshold ----
-
-        # Only one peak is kept within `min_dist_bins` of another
-        peaks, _ = find_peaks(smoothed, height=threshold, distance=min_dist_bins)
-
-        # ---- Store as lists of tuples ----
+        # ---- burst edges per peak using edge_fraction of peak-above-baseline ----
         bursts = []
-        peak_times = []
         burst_windows = []
+        peak_times = []
 
-        # ---- Define burst start/end around each peak ----
-        edge_fraction = self.config.get("burst_edge_fraction", 0.1)
+        for pk in peaks:
+            peak_val = smoothed_hz[pk]
+            # baseline-corrected edge level
+            edge_level = med + edge_fraction * max(0.0, peak_val - med)
 
-        # ---- Construct time axis using one time bin per spike_count (len = num bins)----
-        times = bin_edges[:-1]  # Time for each bin center
-
-        for peak in peaks:
-            # Peak value during 'time' segment
-            peak_val = smoothed[peak]
-
-            # Threshold for burst start/end is read from self.configs for fine-tuning
-            thresh_edge = edge_fraction * peak_val
-
-            # Initialize start and end indices to peak index
-            start, end = peak, peak
-
-            # Walk backward to find burst start where rate drops below edge threshold
-            while start > 0 and smoothed[start] > thresh_edge:
+            # walk backward
+            start = pk
+            while start > 0 and smoothed_hz[start] > edge_level:
                 start -= 1
-
-            # Walk forward to find burst end where rate drops below edge threshold
-            while end < len(smoothed) and smoothed[end] > thresh_edge:
+            # walk forward
+            end = pk
+            last = len(smoothed_hz) - 1
+            while end < last and smoothed_hz[end] > edge_level:
                 end += 1
 
-            # Clamp 'end' index to stay within bounds of the times array
-            if end >= len(times):
-                end = len(times) - 1
-
-            # symmetric trimming so bursts have consistent durations around peak (not sure if this is helpful yet)
-            #lead = peak - start
-            #lag = end - peak
-            #if lag > lead:
-            #    end = peak + lead
-            #if end >= len(times):
-            #    end = len(times) - 1
-
-            # Store (start_idx, end_idx) of burst
             bursts.append((start, end))
+            burst_windows.append((times[start], times[end]))
+            peak_times.append(times[pk])
 
-            # Match peak index back to absolute time in seconds
-            peak_times.append(times[peak])
+        # ---- diagnostics ----
+        est_rate_per_min = (len(peaks) / duration) * 60.0 if duration > 0 else np.nan
+        ds_name = getattr(self, "dataset_key", "dataset")
+        print(f"[{ds_name}] peaks={len(peaks)}, duration={duration:.1f}s, "
+            f"≈{est_rate_per_min:.2f} bursts/min, bin_size_s={bin_size_s:.4f}, thr={thr:.3f} Hz")
 
-        # ---- Merge close bursts (needed so the very wide bursts in treated data don't get double counted) ----
-        def merge_bursts(burst_list, min_sep_bins):
-            if not burst_list:
-                return []
-            merged = [burst_list[0]]
-            for start, end in burst_list[1:]:
-                prev_start, prev_end = merged[-1]
-                if start - prev_end <= min_sep_bins:
-                    merged[-1] = (prev_start, max(prev_end, end))
-                else:
-                    merged.append((start, end))
-            return merged
+        return times, smoothed_hz, peaks, peak_times, bursts, burst_windows
 
-        min_merge_bins = int(min_merge_separation_ms / bin_size_ms)
-        bursts = merge_bursts(bursts, min_merge_bins)
-
-        # Match start and end indices back to absolute times and compute burst windows
-        for start, end in bursts:
-            if end >= len(times):
-                end = len(times) - 1
-            try:
-                burst_windows.append((times[start], times[end]))
-            except IndexError:
-                print(f"[ERROR] Skipping burst at peak={peak} (start={start}, end={end}), times.shape={times.shape}")
-                continue
-
-        # Return all lists and arrays for downstream computations
-        return times, smoothed, peaks, peak_times, bursts, burst_windows
 
     def compute_pop_burst_metrics(
             self,
